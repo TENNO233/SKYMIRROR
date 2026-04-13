@@ -205,3 +205,56 @@ def render_empty_day_report(target_date, case_label: str) -> str:
         "- [ ] Confirm OA process was running throughout the day",
         "",
     ])
+
+
+# ---------------------------------------------------------------------------
+# LLM prompt builders (Hybrid principle — facts-only)
+# ---------------------------------------------------------------------------
+
+_NO_HALLUCINATION_GUARD = (
+    "Do NOT introduce any statistic, number, or claim that is not present "
+    "in the facts dict above. If a field is missing or null, omit it rather "
+    "than inventing a value."
+)
+
+
+def build_tldr_prompt(facts: dict[str, Any]) -> str:
+    return (
+        "You are drafting the Executive Summary (TL;DR) of a daily traffic "
+        "monitoring report. Write 3-5 English sentences for an operations "
+        "audience. Summarise today's activity based ONLY on the following "
+        "pre-computed facts.\n\n"
+        f"Facts:\n{facts}\n\n"
+        f"{_NO_HALLUCINATION_GUARD}"
+    )
+
+
+def build_temporal_prompt(facts: dict[str, Any]) -> str:
+    return (
+        "Write a 2-3 sentence analysis of today's temporal alert distribution "
+        "in English. Mention the peak hour and the morning/evening dominant "
+        "types if present.\n\n"
+        f"Facts:\n{facts}\n\n"
+        f"{_NO_HALLUCINATION_GUARD}"
+    )
+
+
+def build_system_profile_prompt(facts: dict[str, Any]) -> str:
+    return (
+        "Write 3-4 English sentences interpreting today's system behaviour "
+        "metrics (expert activation balance, RAG citation quality, routing "
+        "fallback rate, OA confidence distribution). Keep the tone technical "
+        "and self-reflective.\n\n"
+        f"Facts:\n{facts}\n\n"
+        f"{_NO_HALLUCINATION_GUARD}"
+    )
+
+
+def build_recommendations_prompt(overview: dict[str, Any], profile: dict[str, Any]) -> str:
+    return (
+        "Based on the following daily facts, write 3-5 concise, actionable "
+        "recommendations in English as a bulleted list. Split between "
+        "operational (field-level) and system (maintainer-level) advice.\n\n"
+        f"Overview:\n{overview}\n\nProfile:\n{profile}\n\n"
+        f"{_NO_HALLUCINATION_GUARD}"
+    )

@@ -310,3 +310,19 @@ def test_render_system_profile_section_has_metrics():
     assert "0.875" in md or "0.88" in md
     assert "RTA Section 120(3)" in md
     assert "MOCK_NARRATION" in md
+
+
+# ---------------------------------------------------------------------------
+# Task 14: Prompt builders
+# ---------------------------------------------------------------------------
+
+def test_build_tldr_prompt_embeds_facts_without_raw_records():
+    from skymirror.agents.report_templates import build_tldr_prompt
+    facts = {
+        "total_triggered": 127, "peak_hour": 18,
+        "dominant_type": "traffic_violation", "dominant_type_ratio": 0.70,
+    }
+    prompt = build_tldr_prompt(facts)
+    assert "127" in prompt
+    assert "traffic_violation" in prompt
+    assert "Do NOT" in prompt or "do not" in prompt
