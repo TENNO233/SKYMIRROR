@@ -58,3 +58,38 @@ def test_yesterday_sgt_handles_late_utc_next_sgt_day(monkeypatch):
             return fixed if tz is None else fixed.astimezone(tz)
     monkeypatch.setattr(report_helpers, "datetime", _Clock)
     assert report_helpers.yesterday_sgt() == date(2026, 4, 13)
+
+
+# ---------------------------------------------------------------------------
+# Task 7: compute_overview_stats
+# ---------------------------------------------------------------------------
+
+def test_compute_overview_stats_on_normal_day(fixtures_dir: Path):
+    from skymirror.agents.report_helpers import load_oa_log, compute_overview_stats
+    records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
+    stats = compute_overview_stats(records)
+
+    assert stats["total_decisions"] == 6
+    assert stats["total_triggered"] == 4
+    assert abs(stats["trigger_rate"] - 4/6) < 1e-9
+
+    assert stats["severity_counts"] == {"critical": 1, "high": 2, "medium": 1}
+    assert stats["type_counts"] == {
+        "traffic_violation": 2,
+        "traffic_accident": 1,
+        "env_hazard": 1,
+    }
+    assert stats["dispatch_counts"]["traffic_police"] == 3
+    assert stats["dispatch_counts"]["ambulance"] == 1
+    assert stats["dispatch_counts"]["road_maintenance"] == 2
+
+
+def test_compute_overview_stats_empty():
+    from skymirror.agents.report_helpers import compute_overview_stats
+    stats = compute_overview_stats([])
+    assert stats["total_decisions"] == 0
+    assert stats["total_triggered"] == 0
+    assert stats["trigger_rate"] == 0.0
+    assert stats["severity_counts"] == {}
+    assert stats["type_counts"] == {}
+    assert stats["dispatch_counts"] == {}

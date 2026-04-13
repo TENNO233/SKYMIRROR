@@ -74,3 +74,33 @@ def yesterday_sgt() -> date:
     """
     now_sgt = datetime.now(SGT)
     return (now_sgt - timedelta(days=1)).date()
+
+
+# ---------------------------------------------------------------------------
+# Statistics
+# ---------------------------------------------------------------------------
+
+def compute_overview_stats(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compute top-level counts used in Section 1 (Daily Overview).
+
+    Returns a dict with:
+        total_decisions, total_triggered, trigger_rate,
+        severity_counts, type_counts, dispatch_counts
+    """
+    triggered = [r for r in records if r.get("is_emergency") and r.get("alert")]
+    severity = Counter(r["alert"]["severity"] for r in triggered)
+    etype = Counter(r["alert"]["emergency_type"] for r in triggered)
+    dispatch = Counter(
+        dept
+        for r in triggered
+        for dept in r["alert"].get("dispatched_to", [])
+    )
+    total = len(records)
+    return {
+        "total_decisions": total,
+        "total_triggered": len(triggered),
+        "trigger_rate": (len(triggered) / total) if total else 0.0,
+        "severity_counts": dict(severity),
+        "type_counts": dict(etype),
+        "dispatch_counts": dict(dispatch),
+    }
