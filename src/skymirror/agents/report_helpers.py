@@ -104,3 +104,53 @@ def compute_overview_stats(records: list[dict[str, Any]]) -> dict[str, Any]:
         "type_counts": dict(etype),
         "dispatch_counts": dict(dispatch),
     }
+
+
+def compute_temporal_stats(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compute time-of-day distributions used in Section 3 (Temporal Pattern).
+
+    All times are converted to SGT before bucketing into hours.
+
+    Returns a dict with:
+        hourly_triggered:  dict[int, int] — SGT hour (0-23) -> triggered count
+        hourly_total:      dict[int, int] — SGT hour -> all-decisions count
+        peak_hour:         int | None    — SGT hour with the most triggers (None if no triggers)
+        morning_dominant_type:  str | None  — most common emergency_type during 07-09 SGT, if any
+        evening_dominant_type:  str | None  — most common emergency_type during 17-20 SGT, if any
+    """
+    hourly_triggered: Counter[int] = Counter()
+    hourly_total: Counter[int] = Counter()
+    morning_types: Counter[str] = Counter()
+    evening_types: Counter[str] = Counter()
+
+    for r in records:
+        ts = r.get("timestamp")
+        if not ts:
+            continue
+        try:
+            dt_utc = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        dt_sgt = dt_utc.astimezone(SGT)
+        hour = dt_sgt.hour
+        hourly_total[hour] += 1
+        if r.get("is_emergency") and r.get("alert"):
+            hourly_triggered[hour] += 1
+            etype = r["alert"].get("emergency_type", "unknown")
+            if 7 <= hour <= 9:
+                morning_types[etype] += 1
+            elif 17 <= hour <= 20:
+                evening_types[etype] += 1
+
+    peak_hour = max(hourly_triggered, key=hourly_triggered.get) if hourly_triggered else None
+
+    def _top(c: Counter[str]) -> str | None:
+        return c.most_common(1)[0][0] if c else None
+
+    return {
+        "hourly_triggered": dict(hourly_triggered),
+        "hourly_total": dict(hourly_total),
+        "peak_hour": peak_hour,
+        "morning_dominant_type": _top(morning_types),
+        "evening_dominant_type": _top(evening_types),
+    }

@@ -93,3 +93,24 @@ def test_compute_overview_stats_empty():
     assert stats["severity_counts"] == {}
     assert stats["type_counts"] == {}
     assert stats["dispatch_counts"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Task 8: compute_temporal_stats
+# ---------------------------------------------------------------------------
+
+def test_compute_temporal_stats_on_normal_day(fixtures_dir: Path):
+    from skymirror.agents.report_helpers import load_oa_log, compute_temporal_stats
+    records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
+    stats = compute_temporal_stats(records)
+
+    # 00:30Z = 08:30 SGT -> hour 8
+    # 06:15Z = 14:15 SGT -> hour 14
+    # 08:42Z = 16:42 SGT -> hour 16
+    # 12:05Z = 20:05 SGT -> hour 20
+    assert stats["hourly_triggered"][8] == 1
+    assert stats["hourly_triggered"][14] == 1
+    assert stats["hourly_triggered"][16] == 1
+    assert stats["hourly_triggered"][20] == 1
+
+    assert stats["peak_hour"] in {8, 14, 16, 20}
