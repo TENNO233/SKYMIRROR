@@ -114,3 +114,28 @@ def test_compute_temporal_stats_on_normal_day(fixtures_dir: Path):
     assert stats["hourly_triggered"][20] == 1
 
     assert stats["peak_hour"] in {8, 14, 16, 20}
+
+
+# ---------------------------------------------------------------------------
+# Task 9: compute_system_profile_stats
+# ---------------------------------------------------------------------------
+
+def test_compute_system_profile_on_normal_day(fixtures_dir: Path):
+    from skymirror.agents.report_helpers import load_oa_log, compute_system_profile_stats
+    records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
+    profile = compute_system_profile_stats(records)
+
+    assert profile["expert_activation_counts"]["order_expert"] == 3
+    assert profile["expert_activation_counts"]["safety_expert"] == 1
+    assert profile["expert_activation_counts"]["environment_expert"] == 2
+
+    assert profile["fallback_count"] == 1
+    assert abs(profile["fallback_rate"] - 1/6) < 1e-9
+
+    # citations: records 0 (0.89), 1 (0.91), 2 (0.82), 5 (0.88) -> avg 0.875
+    assert abs(profile["avg_rag_relevance"] - 0.875) < 1e-6
+
+    assert profile["top_regulation_code"] == "RTA Section 120(3)"
+
+    # triggered oa_confidence: 0.92, 0.96, 0.81, 0.89  -> 2 high, 2 mid, 0 low
+    assert profile["oa_confidence_buckets"] == {"high_\u22650.9": 2, "mid_0.7\u20130.89": 2, "low_<0.7": 0}

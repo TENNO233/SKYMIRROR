@@ -154,3 +154,56 @@ def compute_temporal_stats(records: list[dict[str, Any]]) -> dict[str, Any]:
         "morning_dominant_type": _top(morning_types),
         "evening_dominant_type": _top(evening_types),
     }
+
+
+def compute_system_profile_stats(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compute XAI self-reflection stats used in Section 5 (System Profile).
+
+    Returns a dict with:
+        expert_activation_counts: dict[str, int] across ALL records
+        fallback_count, fallback_rate: number and fraction of records with
+            empty activated_experts
+        avg_rag_relevance: float across every citation in every record
+        top_regulation_code: str | None — most frequently cited code
+        oa_confidence_buckets: three-bucket histogram of triggered oa_confidence
+    """
+    activation_counts: Counter[str] = Counter()
+    fallback_count = 0
+    rag_scores: list[float] = []
+    reg_codes: Counter[str] = Counter()
+    buckets = {"high_\u22650.9": 0, "mid_0.7\u20130.89": 0, "low_<0.7": 0}
+
+    for r in records:
+        experts = (r.get("routing_trace") or {}).get("activated_experts") or []
+        if experts:
+            for e in experts:
+                activation_counts[e] += 1
+        else:
+            fallback_count += 1
+        for cite in (r.get("rag_citations") or []):
+            try:
+                rag_scores.append(float(cite.get("relevance_score", 0.0)))
+            except (TypeError, ValueError):
+                pass
+            code = cite.get("regulation_code")
+            if code:
+                reg_codes[code] += 1
+
+        if r.get("is_emergency"):
+            conf = float(r.get("oa_confidence", 0.0))
+            if conf >= 0.9:
+                buckets["high_\u22650.9"] += 1
+            elif conf >= 0.7:
+                buckets["mid_0.7\u20130.89"] += 1
+            else:
+                buckets["low_<0.7"] += 1
+
+    total = len(records)
+    return {
+        "expert_activation_counts": dict(activation_counts),
+        "fallback_count": fallback_count,
+        "fallback_rate": (fallback_count / total) if total else 0.0,
+        "avg_rag_relevance": (sum(rag_scores) / len(rag_scores)) if rag_scores else 0.0,
+        "top_regulation_code": reg_codes.most_common(1)[0][0] if reg_codes else None,
+        "oa_confidence_buckets": buckets,
+    }
