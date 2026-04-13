@@ -116,6 +116,16 @@ def test_compute_temporal_stats_on_normal_day(fixtures_dir: Path):
     assert stats["peak_hour"] in {8, 14, 16, 20}
 
 
+def test_compute_temporal_stats_empty():
+    from skymirror.agents.report_helpers import compute_temporal_stats
+    stats = compute_temporal_stats([])
+    assert stats["hourly_triggered"] == {}
+    assert stats["hourly_total"] == {}
+    assert stats["peak_hour"] is None
+    assert stats["morning_dominant_type"] is None
+    assert stats["evening_dominant_type"] is None
+
+
 # ---------------------------------------------------------------------------
 # Task 9: compute_system_profile_stats
 # ---------------------------------------------------------------------------
@@ -139,6 +149,17 @@ def test_compute_system_profile_on_normal_day(fixtures_dir: Path):
 
     # triggered oa_confidence: 0.92, 0.96, 0.81, 0.89  -> 2 high, 2 mid, 0 low
     assert profile["oa_confidence_buckets"] == {"high_\u22650.9": 2, "mid_0.7\u20130.89": 2, "low_<0.7": 0}
+
+
+def test_compute_system_profile_empty():
+    from skymirror.agents.report_helpers import compute_system_profile_stats
+    profile = compute_system_profile_stats([])
+    assert profile["expert_activation_counts"] == {}
+    assert profile["fallback_count"] == 0
+    assert profile["fallback_rate"] == 0.0
+    assert profile["avg_rag_relevance"] == 0.0
+    assert profile["top_regulation_code"] is None
+    assert profile["oa_confidence_buckets"] == {"high_\u22650.9": 0, "mid_0.7\u20130.89": 0, "low_<0.7": 0}
 
 
 # ---------------------------------------------------------------------------

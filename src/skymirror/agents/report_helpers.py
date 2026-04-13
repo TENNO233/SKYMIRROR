@@ -88,8 +88,12 @@ def compute_overview_stats(records: list[dict[str, Any]]) -> dict[str, Any]:
         severity_counts, type_counts, dispatch_counts
     """
     triggered = [r for r in records if r.get("is_emergency") and r.get("alert")]
-    severity = Counter(r["alert"]["severity"] for r in triggered)
-    etype = Counter(r["alert"]["emergency_type"] for r in triggered)
+    severity = Counter(
+        (r.get("alert") or {}).get("severity", "unknown") for r in triggered
+    )
+    etype = Counter(
+        (r.get("alert") or {}).get("emergency_type", "unknown") for r in triggered
+    )
     dispatch = Counter(
         dept
         for r in triggered
@@ -131,6 +135,9 @@ def compute_temporal_stats(records: list[dict[str, Any]]) -> dict[str, Any]:
             dt_utc = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         except ValueError:
             continue
+        if dt_utc.tzinfo is None:
+            # Upstream timestamps SHOULD be tz-aware; if not, assume UTC.
+            dt_utc = dt_utc.replace(tzinfo=timezone.utc)
         dt_sgt = dt_utc.astimezone(SGT)
         hour = dt_sgt.hour
         hourly_total[hour] += 1
@@ -190,7 +197,10 @@ def compute_system_profile_stats(records: list[dict[str, Any]]) -> dict[str, Any
                 reg_codes[code] += 1
 
         if r.get("is_emergency"):
-            conf = float(r.get("oa_confidence", 0.0))
+            try:
+                conf = float(r.get("oa_confidence", 0.0))
+            except (TypeError, ValueError):
+                conf = 0.0
             if conf >= 0.9:
                 buckets["high_\u22650.9"] += 1
             elif conf >= 0.7:
@@ -223,7 +233,10 @@ def _severity_rank(rec: dict[str, Any]) -> int:
 
 
 def _confidence(rec: dict[str, Any]) -> float:
-    return float(rec.get("oa_confidence", 0.0))
+    try:
+        return float(rec.get("oa_confidence", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def select_representative_cases(
@@ -259,7 +272,8 @@ def select_representative_cases(
 
     # Phase 2: if we still need more, fall back to remaining top-severity.
     if len(picked) < n:
-        remaining = [r for r in sorted_pool if r not in picked]
+        picked_ids = {id(r) for r in picked}
+        remaining = [r for r in sorted_pool if id(r) not in picked_ids]
         picked.extend(remaining[: n - len(picked)])
 
     return picked
