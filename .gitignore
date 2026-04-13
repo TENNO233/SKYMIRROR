@@ -79,3 +79,10 @@ Desktop.ini
 .idea/
 *.swp
 *.swo
+
+# Daily Explication Report runtime outputs
+data/oa_log/
+data/reports/
+
+# Local virtualenv
+.venv/
