@@ -139,3 +139,41 @@ def test_compute_system_profile_on_normal_day(fixtures_dir: Path):
 
     # triggered oa_confidence: 0.92, 0.96, 0.81, 0.89  -> 2 high, 2 mid, 0 low
     assert profile["oa_confidence_buckets"] == {"high_\u22650.9": 2, "mid_0.7\u20130.89": 2, "low_<0.7": 0}
+
+
+# ---------------------------------------------------------------------------
+# Task 10: select_representative_cases
+# ---------------------------------------------------------------------------
+
+def test_select_cases_prefers_diversity(fixtures_dir: Path):
+    from skymirror.agents.report_helpers import (
+        load_oa_log, select_representative_cases
+    )
+    records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
+    triggered = [r for r in records if r.get("is_emergency")]
+    cases = select_representative_cases(triggered, n=3)
+
+    types = {c["alert"]["emergency_type"] for c in cases}
+    assert types == {"traffic_accident", "traffic_violation", "env_hazard"}
+    assert any(c["alert"]["severity"] == "critical" for c in cases)
+
+
+def test_select_cases_returns_fewer_than_n_if_data_insufficient():
+    from skymirror.agents.report_helpers import select_representative_cases
+    assert select_representative_cases([], n=3) == []
+
+
+def test_select_cases_single_type_returns_top_severity(fixtures_dir: Path):
+    from skymirror.agents.report_helpers import (
+        load_oa_log, select_representative_cases
+    )
+    records = load_oa_log(
+        fixtures_dir, date(2026, 4, 12), filename_stem_override="single_type_day"
+    )
+    triggered = [r for r in records if r.get("is_emergency")]
+    cases = select_representative_cases(triggered, n=3)
+    assert len(cases) == 3
+    severities = [c["alert"]["severity"] for c in cases]
+    assert severities[0] == "critical"
+    assert severities[1] == "high"
+    assert severities[2] == "medium"

@@ -207,3 +207,59 @@ def compute_system_profile_stats(records: list[dict[str, Any]]) -> dict[str, Any
         "top_regulation_code": reg_codes.most_common(1)[0][0] if reg_codes else None,
         "oa_confidence_buckets": buckets,
     }
+
+
+# ---------------------------------------------------------------------------
+# Case selection
+# ---------------------------------------------------------------------------
+
+_SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+
+
+def _severity_rank(rec: dict[str, Any]) -> int:
+    return _SEVERITY_ORDER.get(
+        (rec.get("alert") or {}).get("severity", "low"), 0
+    )
+
+
+def _confidence(rec: dict[str, Any]) -> float:
+    return float(rec.get("oa_confidence", 0.0))
+
+
+def select_representative_cases(
+    triggered: list[dict[str, Any]], n: int = 3
+) -> list[dict[str, Any]]:
+    """Pick up to `n` representative cases via Top-Severity + Diversity Dedup.
+
+    Algorithm:
+        1. Sort by (severity DESC, oa_confidence DESC); take top min(10, len) as pool.
+        2. In order, pick cases whose emergency_type has not yet been picked,
+           until we have n cases or the pool is exhausted.
+        3. If still fewer than n and pool still has unpicked cases, fall back
+           to taking additional top-severity cases regardless of type.
+    """
+    if not triggered:
+        return []
+
+    sorted_pool = sorted(
+        triggered, key=lambda r: (_severity_rank(r), _confidence(r)), reverse=True
+    )[:10]
+
+    picked: list[dict[str, Any]] = []
+    seen_types: set[str] = set()
+
+    # Phase 1: type-diverse picks from the pool.
+    for rec in sorted_pool:
+        if len(picked) >= n:
+            break
+        etype = (rec.get("alert") or {}).get("emergency_type", "__unknown__")
+        if etype not in seen_types:
+            picked.append(rec)
+            seen_types.add(etype)
+
+    # Phase 2: if we still need more, fall back to remaining top-severity.
+    if len(picked) < n:
+        remaining = [r for r in sorted_pool if r not in picked]
+        picked.extend(remaining[: n - len(picked)])
+
+    return picked
