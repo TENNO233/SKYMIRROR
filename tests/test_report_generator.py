@@ -198,3 +198,42 @@ def test_select_cases_single_type_returns_top_severity(fixtures_dir: Path):
     assert severities[0] == "critical"
     assert severities[1] == "high"
     assert severities[2] == "medium"
+
+
+# ---------------------------------------------------------------------------
+# Task 11: LLM factory
+# ---------------------------------------------------------------------------
+
+def test_get_llm_default_is_anthropic(monkeypatch):
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    from skymirror.agents._llm import get_llm
+    llm = get_llm()
+    assert type(llm).__name__ == "ChatAnthropic"
+
+
+def test_get_llm_respects_openai_env(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy-key")
+    from skymirror.agents._llm import get_llm
+    llm = get_llm()
+    assert type(llm).__name__ == "ChatOpenAI"
+
+
+def test_get_llm_rejects_unknown_provider(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "bogus")
+    from skymirror.agents._llm import get_llm
+    with pytest.raises(ValueError):
+        get_llm()
+
+
+def test_narrate_uses_fallback_when_llm_fails(monkeypatch):
+    """If the provided LLM object's invoke raises, narrate() returns fallback."""
+    from skymirror.agents._llm import narrate
+
+    class _Broken:
+        def invoke(self, *_a, **_kw):
+            raise RuntimeError("API down")
+
+    out = narrate("prompt", fallback="FALLBACK_TEXT", llm=_Broken())
+    assert "FALLBACK_TEXT" in out
+    assert "LLM narration unavailable" in out
