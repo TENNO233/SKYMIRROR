@@ -237,3 +237,37 @@ def test_narrate_uses_fallback_when_llm_fails(monkeypatch):
     out = narrate("prompt", fallback="FALLBACK_TEXT", llm=_Broken())
     assert "FALLBACK_TEXT" in out
     assert "LLM narration unavailable" in out
+
+
+# ---------------------------------------------------------------------------
+# Task 12: Template renderers
+# ---------------------------------------------------------------------------
+
+def test_render_overview_section():
+    from skymirror.agents.report_templates import render_overview_section
+    stats = {
+        "total_decisions": 6, "total_triggered": 4, "trigger_rate": 0.667,
+        "severity_counts": {"critical": 1, "high": 2, "medium": 1},
+        "type_counts": {"traffic_violation": 2, "traffic_accident": 1, "env_hazard": 1},
+        "dispatch_counts": {"traffic_police": 3, "ambulance": 1, "road_maintenance": 2},
+    }
+    md = render_overview_section(stats)
+    assert "## 1. Daily Overview" in md
+    assert "6" in md and "4" in md and "66.7%" in md
+    assert "critical" in md and "traffic_violation" in md
+    assert "traffic_police" in md
+
+
+def test_render_case_section_has_three_layers(fixtures_dir: Path):
+    from skymirror.agents.report_helpers import load_oa_log
+    from skymirror.agents.report_templates import render_case
+    records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
+    case = records[1]  # the critical collision
+    md = render_case(case, index=1)
+
+    assert "Scene" in md
+    assert "Expert Finding" in md or "Legal Citation" in md
+    assert "OA Decision" in md or "Dispatch" in md
+    assert "collision" in md.lower()
+    assert "ERP-3.2" in md
+    assert "ambulance" in md
