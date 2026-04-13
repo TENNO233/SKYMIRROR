@@ -271,3 +271,42 @@ def test_render_case_section_has_three_layers(fixtures_dir: Path):
     assert "collision" in md.lower()
     assert "ERP-3.2" in md
     assert "ambulance" in md
+
+
+# ---------------------------------------------------------------------------
+# Task 13: Remaining template renderers
+# ---------------------------------------------------------------------------
+
+def test_render_empty_day_report_contains_self_diagnostic():
+    from skymirror.agents.report_templates import render_empty_day_report
+    md = render_empty_day_report(date(2026, 4, 12), case_label="A")
+    assert "NOT necessarily normal" in md
+    assert "Verification checklist" in md
+    assert "2026-04-12" in md
+
+
+def test_render_appendix_compact_list(fixtures_dir: Path):
+    from skymirror.agents.report_helpers import load_oa_log
+    from skymirror.agents.report_templates import render_appendix_section
+    records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
+    triggered = [r for r in records if r.get("is_emergency")]
+    featured_ids = {triggered[0]["decision_id"]}
+    md = render_appendix_section(triggered, featured_ids, jsonl_path="data/oa_log/2026-04-12.jsonl")
+    assert "## 7. Appendix" in md
+    assert "other" in md.lower()
+
+
+def test_render_system_profile_section_has_metrics():
+    from skymirror.agents.report_templates import render_system_profile_section
+    profile = {
+        "expert_activation_counts": {"order_expert": 3, "safety_expert": 1, "environment_expert": 2},
+        "fallback_count": 1, "fallback_rate": 0.1667,
+        "avg_rag_relevance": 0.875, "top_regulation_code": "RTA Section 120(3)",
+        "oa_confidence_buckets": {"high_≥0.9": 2, "mid_0.7–0.89": 2, "low_<0.7": 0},
+    }
+    md = render_system_profile_section(profile, narration="MOCK_NARRATION")
+    assert "## 5. System Behaviour Profile" in md
+    assert "order_expert" in md
+    assert "0.875" in md or "0.88" in md
+    assert "RTA Section 120(3)" in md
+    assert "MOCK_NARRATION" in md

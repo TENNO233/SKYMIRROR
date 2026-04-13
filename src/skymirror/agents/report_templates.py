@@ -94,3 +94,114 @@ def render_case(case: dict[str, Any], index: int) -> str:
         f"Dispatched to: **{dispatched}** (status: {status})",
         "",
     ])
+
+
+# ---------------------------------------------------------------------------
+# Section 3 — Temporal Pattern (narration only; facts passed in)
+# ---------------------------------------------------------------------------
+
+def render_temporal_section(stats: dict[str, Any], narration: str) -> str:
+    peak = stats.get("peak_hour")
+    morn = stats.get("morning_dominant_type") or "n/a"
+    eve = stats.get("evening_dominant_type") or "n/a"
+    facts_line = (
+        f"_Peak hour (SGT): {peak if peak is not None else 'n/a'} · "
+        f"Morning dominant type: {morn} · Evening dominant type: {eve}_"
+    )
+    return "\n".join([
+        "## 3. Temporal Pattern Analysis",
+        "",
+        facts_line,
+        "",
+        narration,
+        "",
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Section 5 — System Behaviour Profile
+# ---------------------------------------------------------------------------
+
+def render_system_profile_section(profile: dict[str, Any], narration: str) -> str:
+    experts = _fmt_counts_inline(profile["expert_activation_counts"])
+    buckets = _fmt_counts_inline(profile["oa_confidence_buckets"])
+    return "\n".join([
+        "## 5. System Behaviour Profile",
+        "",
+        f"- **Expert activations**: {experts}",
+        f"- **Routing fallback**: {profile['fallback_count']} frames "
+        f"({_fmt_pct(profile['fallback_rate'])})",
+        f"- **Average RAG relevance**: {profile['avg_rag_relevance']:.3f}",
+        f"- **Top cited regulation**: {profile.get('top_regulation_code') or 'n/a'}",
+        f"- **OA confidence distribution (triggered alerts)**: {buckets}",
+        "",
+        narration,
+        "",
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Section 7 — Appendix
+# ---------------------------------------------------------------------------
+
+def render_appendix_section(
+    triggered: list[dict[str, Any]],
+    featured_ids: set[str],
+    jsonl_path: str,
+) -> str:
+    other = [t for t in triggered if t.get("decision_id") not in featured_ids]
+    by_type: dict[str, int] = {}
+    for t in other:
+        et = (t.get("alert") or {}).get("emergency_type", "unknown")
+        by_type[et] = by_type.get(et, 0) + 1
+    summary = _fmt_counts_inline(by_type) if by_type else "_(none)_"
+    return "\n".join([
+        "## 7. Appendix",
+        "",
+        f"**Other alerts**: {len(other)} records ({summary}).",
+        f"Full list available in: `{jsonl_path}` (filter `is_emergency = true`).",
+        "",
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Empty-Day Self-Diagnostic Report
+# ---------------------------------------------------------------------------
+
+def render_empty_day_report(target_date, case_label: str) -> str:
+    """Render the self-diagnostic report for an empty day.
+
+    `case_label` is "A", "B", or "C" per Section 5.1 of the spec — used to
+    tune the diagnostic framing.
+    """
+    case_intro = {
+        "A": "OA log file is missing entirely — OA may not have run today.",
+        "B": "OA log file exists but contains no records — OA started but "
+             "processed no frames.",
+        "C": "OA evaluated frames all day but triggered no alerts — this may "
+             "indicate stale keyword vocabulary, overly strict thresholds, or "
+             "a genuinely incident-free day.",
+    }.get(case_label, "Unknown empty-day case.")
+
+    return "\n".join([
+        f"# SKYMIRROR Daily Report — {target_date.isoformat()}",
+        "",
+        "## ⚠️ No alerts detected today — this is NOT necessarily normal.",
+        "",
+        f"**Diagnostic framing**: {case_intro}",
+        "",
+        "**Possible causes (ranked by likelihood):**",
+        "1. Camera offline or image stream interrupted",
+        "2. Silent failure in VLM or Validator stage (no exceptions but empty output)",
+        "3. Routing fallback rate unusually high (keyword vocabulary may be stale)",
+        "4. Expert RAG retrieval failures",
+        "5. (Rare) Genuinely incident-free monitoring period",
+        "",
+        "**Verification checklist:**",
+        "- [ ] Check `data/frames/` for today's new frames (~4,300 expected at 20s intervals)",
+        "- [ ] Review pipeline logs for ERROR/WARNING",
+        "- [ ] Verify cam4798 is not under maintenance",
+        "- [ ] Compare total-decision count against 7-day baseline",
+        "- [ ] Confirm OA process was running throughout the day",
+        "",
+    ])
