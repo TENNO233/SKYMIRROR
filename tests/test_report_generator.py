@@ -326,3 +326,60 @@ def test_build_tldr_prompt_embeds_facts_without_raw_records():
     assert "127" in prompt
     assert "traffic_violation" in prompt
     assert "Do NOT" in prompt or "do not" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Task 15: Orchestrator end-to-end
+# ---------------------------------------------------------------------------
+
+def test_generate_report_end_to_end_normal_day(tmp_path, fixtures_dir, mock_llm):
+    """End-to-end: normal_day fixture produces a 7-section Markdown report."""
+    from skymirror.agents.report_generator import generate_report
+
+    oa_log_dir = tmp_path / "oa_log"
+    oa_log_dir.mkdir()
+    src = (fixtures_dir / "normal_day.jsonl").read_bytes()
+    (oa_log_dir / "2026-04-12.jsonl").write_bytes(src)
+
+    output_dir = tmp_path / "reports"
+    report_path = generate_report(
+        target_date=date(2026, 4, 12),
+        oa_log_dir=oa_log_dir,
+        output_dir=output_dir,
+    )
+
+    assert report_path.exists()
+    text = report_path.read_text()
+    for heading in [
+        "## 1. Daily Overview",
+        "## 2. Executive Summary",
+        "## 3. Temporal Pattern Analysis",
+        "## 4. Representative Case Explications",
+        "## 5. System Behaviour Profile",
+        "## 6. Recommendations",
+        "## 7. Appendix",
+    ]:
+        assert heading in text, f"missing: {heading}"
+
+    assert "collision" in text.lower() or "red light" in text.lower()
+
+
+def test_generate_report_empty_day_produces_self_diagnostic(tmp_path, mock_llm):
+    from skymirror.agents.report_generator import generate_report
+    oa_log_dir = tmp_path / "oa_log"
+    oa_log_dir.mkdir()
+    output_dir = tmp_path / "reports"
+    report_path = generate_report(
+        target_date=date(2026, 4, 12),
+        oa_log_dir=oa_log_dir,
+        output_dir=output_dir,
+    )
+    text = report_path.read_text()
+    assert "NOT necessarily normal" in text
+    assert "Verification checklist" in text
+
+
+def test_generate_daily_report_legacy_wrapper_exists():
+    """main.py's APScheduler imports `generate_daily_report` — must remain callable."""
+    from skymirror.agents.report_generator import generate_daily_report
+    assert callable(generate_daily_report)
