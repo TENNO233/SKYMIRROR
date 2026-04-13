@@ -1,8 +1,12 @@
-"""Markdown renderers and LLM prompt builders for the Daily Report.
+"""Markdown renderers and LLM prompt builders for the Daily Explication Report Agent.
 
-All facts must be pre-computed by `report_helpers`; these functions only
-lay out the result. Keeping this file pure-template makes visual changes
-(heading levels, emoji, wording) easy to diff without touching logic.
+All facts must be pre-computed by `skymirror.tools.daily_report.analysis`;
+these functions only lay out the result. Keeping this file pure-template makes
+visual changes (heading levels, emoji, wording) easy to diff without touching
+logic. LLM prompt builders follow the Hybrid principle: they pass only
+pre-computed facts and include a no-hallucination guard.
+
+Used by: `skymirror.agents.report_generator`.
 """
 from __future__ import annotations
 

@@ -1,12 +1,44 @@
-"""Daily Explication Report Agent — orchestrator, CLI, and legacy wrapper.
+"""
+Daily Explication Report Agent
+==============================
 
-Public entry points:
-    - generate_report(target_date, oa_log_dir, output_dir) -> Path
-        Core function; OA or CLI should call this.
-    - generate_daily_report() -> Path
-        Zero-arg wrapper for main.py's existing APScheduler integration.
-    - python -m skymirror.agents.report_generator [--date YYYY-MM-DD] ...
-        CLI for demos and tests.
+Identity
+--------
+I am SKYMIRROR's human-facing output surface. I turn a day's worth of
+Orchestrator Agent (OA) decisions into a readable English Markdown report
+grounded in XAI principles (process transparency + source attribution).
+
+I am NOT a per-frame LangGraph node. I am invoked once per day by OA
+(at a scheduled time), or manually via CLI for testing and demos.
+
+Tasks
+-----
+1. Load all OA decision records for the target SGT day from
+   `data/oa_log/YYYY-MM-DD.jsonl`.
+2. Compute aggregate statistics (overview totals, temporal patterns,
+   system-behaviour profile).
+3. Select 3 representative cases via Top-Severity + Diversity Dedup.
+4. Render 7 Markdown sections. Four narrative sections go through an LLM
+   (Hybrid principle: template computes facts, LLM only narrates prose).
+5. Handle empty-day scenarios with a self-diagnostic report that resists
+   the "all systems nominal" false positive.
+6. Write the final Markdown to `data/reports/YYYY-MM-DD.md`.
+
+Tools
+-----
+- `skymirror.tools.daily_report.loader`     : load_oa_log, yesterday_sgt
+- `skymirror.tools.daily_report.analysis`   : stats + case selection
+- `skymirror.tools.daily_report.rendering`  : Markdown templates + LLM prompts
+- `skymirror.tools.llm_factory`             : LLM provider + narrate() with fallback
+
+Entry points
+------------
+- `generate_report(target_date, oa_log_dir, output_dir) -> Path`
+    Primary entry. OA or CLI calls this.
+- `generate_daily_report()` : zero-arg legacy wrapper for `main.py`'s
+    existing APScheduler integration. DO NOT rename; upstream imports it.
+- `python -m skymirror.agents.report_generator [--date ...]`
+    CLI for demos and manual runs.
 """
 from __future__ import annotations
 
@@ -17,16 +49,15 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from skymirror.agents._llm import narrate
-from skymirror.agents.report_helpers import (
+from skymirror.tools.llm_factory import narrate
+from skymirror.tools.daily_report.loader import load_oa_log, yesterday_sgt
+from skymirror.tools.daily_report.analysis import (
     compute_overview_stats,
     compute_system_profile_stats,
     compute_temporal_stats,
-    load_oa_log,
     select_representative_cases,
-    yesterday_sgt,
 )
-from skymirror.agents.report_templates import (
+from skymirror.tools.daily_report.rendering import (
     build_recommendations_prompt,
     build_system_profile_prompt,
     build_temporal_prompt,

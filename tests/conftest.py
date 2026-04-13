@@ -37,6 +37,6 @@ def mock_llm(monkeypatch):
             return _FakeResponse(content=f"[MOCK LLM narration for: {head!r}]")
 
     monkeypatch.setattr(
-        "skymirror.agents._llm.get_llm",
+        "skymirror.tools.llm_factory.get_llm",
         lambda **kwargs: _FakeLLM(),
     )

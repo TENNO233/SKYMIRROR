@@ -12,20 +12,20 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def test_load_oa_log_reads_jsonl(fixtures_dir: Path):
-    from skymirror.agents.report_helpers import load_oa_log
+    from skymirror.tools.daily_report.loader import load_oa_log
     records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
     assert len(records) == 6
     assert records[0]["decision_id"] == "oa_20260412T083000_cam4798"
 
 
 def test_load_oa_log_missing_file_returns_empty(tmp_path: Path):
-    from skymirror.agents.report_helpers import load_oa_log
+    from skymirror.tools.daily_report.loader import load_oa_log
     records = load_oa_log(tmp_path, date(2026, 4, 12))
     assert records == []
 
 
 def test_load_oa_log_skips_malformed_lines(fixtures_dir: Path):
-    from skymirror.agents.report_helpers import load_oa_log
+    from skymirror.tools.daily_report.loader import load_oa_log
     records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="malformed_day")
     assert len(records) == 2
     assert records[0]["decision_id"] == "oa_good_001"
@@ -37,7 +37,7 @@ def test_load_oa_log_skips_malformed_lines(fixtures_dir: Path):
 # ---------------------------------------------------------------------------
 
 def test_yesterday_sgt_returns_previous_sgt_date(monkeypatch):
-    from skymirror.agents import report_helpers
+    from skymirror.tools.daily_report import loader as report_helpers
     fixed = datetime(2026, 4, 13, 2, 0, tzinfo=timezone.utc)  # = 10:00 SGT
     class _Clock:
         @classmethod
@@ -50,7 +50,7 @@ def test_yesterday_sgt_returns_previous_sgt_date(monkeypatch):
 def test_yesterday_sgt_handles_late_utc_next_sgt_day(monkeypatch):
     """At 20:00 UTC on 2026-04-13, SGT time is 04:00 on 2026-04-14.
     So 'yesterday_sgt' should be 2026-04-13."""
-    from skymirror.agents import report_helpers
+    from skymirror.tools.daily_report import loader as report_helpers
     fixed = datetime(2026, 4, 13, 20, 0, tzinfo=timezone.utc)  # = 04:00 SGT on 04-14
     class _Clock:
         @classmethod
@@ -65,7 +65,8 @@ def test_yesterday_sgt_handles_late_utc_next_sgt_day(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_compute_overview_stats_on_normal_day(fixtures_dir: Path):
-    from skymirror.agents.report_helpers import load_oa_log, compute_overview_stats
+    from skymirror.tools.daily_report.loader import load_oa_log
+    from skymirror.tools.daily_report.analysis import compute_overview_stats
     records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
     stats = compute_overview_stats(records)
 
@@ -85,7 +86,7 @@ def test_compute_overview_stats_on_normal_day(fixtures_dir: Path):
 
 
 def test_compute_overview_stats_empty():
-    from skymirror.agents.report_helpers import compute_overview_stats
+    from skymirror.tools.daily_report.analysis import compute_overview_stats
     stats = compute_overview_stats([])
     assert stats["total_decisions"] == 0
     assert stats["total_triggered"] == 0
@@ -100,7 +101,8 @@ def test_compute_overview_stats_empty():
 # ---------------------------------------------------------------------------
 
 def test_compute_temporal_stats_on_normal_day(fixtures_dir: Path):
-    from skymirror.agents.report_helpers import load_oa_log, compute_temporal_stats
+    from skymirror.tools.daily_report.loader import load_oa_log
+    from skymirror.tools.daily_report.analysis import compute_temporal_stats
     records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
     stats = compute_temporal_stats(records)
 
@@ -117,7 +119,7 @@ def test_compute_temporal_stats_on_normal_day(fixtures_dir: Path):
 
 
 def test_compute_temporal_stats_empty():
-    from skymirror.agents.report_helpers import compute_temporal_stats
+    from skymirror.tools.daily_report.analysis import compute_temporal_stats
     stats = compute_temporal_stats([])
     assert stats["hourly_triggered"] == {}
     assert stats["hourly_total"] == {}
@@ -131,7 +133,8 @@ def test_compute_temporal_stats_empty():
 # ---------------------------------------------------------------------------
 
 def test_compute_system_profile_on_normal_day(fixtures_dir: Path):
-    from skymirror.agents.report_helpers import load_oa_log, compute_system_profile_stats
+    from skymirror.tools.daily_report.loader import load_oa_log
+    from skymirror.tools.daily_report.analysis import compute_system_profile_stats
     records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
     profile = compute_system_profile_stats(records)
 
@@ -152,7 +155,7 @@ def test_compute_system_profile_on_normal_day(fixtures_dir: Path):
 
 
 def test_compute_system_profile_empty():
-    from skymirror.agents.report_helpers import compute_system_profile_stats
+    from skymirror.tools.daily_report.analysis import compute_system_profile_stats
     profile = compute_system_profile_stats([])
     assert profile["expert_activation_counts"] == {}
     assert profile["fallback_count"] == 0
@@ -167,9 +170,8 @@ def test_compute_system_profile_empty():
 # ---------------------------------------------------------------------------
 
 def test_select_cases_prefers_diversity(fixtures_dir: Path):
-    from skymirror.agents.report_helpers import (
-        load_oa_log, select_representative_cases
-    )
+    from skymirror.tools.daily_report.loader import load_oa_log
+    from skymirror.tools.daily_report.analysis import select_representative_cases
     records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
     triggered = [r for r in records if r.get("is_emergency")]
     cases = select_representative_cases(triggered, n=3)
@@ -180,14 +182,13 @@ def test_select_cases_prefers_diversity(fixtures_dir: Path):
 
 
 def test_select_cases_returns_fewer_than_n_if_data_insufficient():
-    from skymirror.agents.report_helpers import select_representative_cases
+    from skymirror.tools.daily_report.analysis import select_representative_cases
     assert select_representative_cases([], n=3) == []
 
 
 def test_select_cases_single_type_returns_top_severity(fixtures_dir: Path):
-    from skymirror.agents.report_helpers import (
-        load_oa_log, select_representative_cases
-    )
+    from skymirror.tools.daily_report.loader import load_oa_log
+    from skymirror.tools.daily_report.analysis import select_representative_cases
     records = load_oa_log(
         fixtures_dir, date(2026, 4, 12), filename_stem_override="single_type_day"
     )
@@ -206,7 +207,7 @@ def test_select_cases_single_type_returns_top_severity(fixtures_dir: Path):
 
 def test_get_llm_default_is_anthropic(monkeypatch):
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
-    from skymirror.agents._llm import get_llm
+    from skymirror.tools.llm_factory import get_llm
     llm = get_llm()
     assert type(llm).__name__ == "ChatAnthropic"
 
@@ -214,21 +215,21 @@ def test_get_llm_default_is_anthropic(monkeypatch):
 def test_get_llm_respects_openai_env(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy-key")
-    from skymirror.agents._llm import get_llm
+    from skymirror.tools.llm_factory import get_llm
     llm = get_llm()
     assert type(llm).__name__ == "ChatOpenAI"
 
 
 def test_get_llm_rejects_unknown_provider(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "bogus")
-    from skymirror.agents._llm import get_llm
+    from skymirror.tools.llm_factory import get_llm
     with pytest.raises(ValueError):
         get_llm()
 
 
 def test_narrate_uses_fallback_when_llm_fails(monkeypatch):
     """If the provided LLM object's invoke raises, narrate() returns fallback."""
-    from skymirror.agents._llm import narrate
+    from skymirror.tools.llm_factory import narrate
 
     class _Broken:
         def invoke(self, *_a, **_kw):
@@ -244,7 +245,7 @@ def test_narrate_uses_fallback_when_llm_fails(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_render_overview_section():
-    from skymirror.agents.report_templates import render_overview_section
+    from skymirror.tools.daily_report.rendering import render_overview_section
     stats = {
         "total_decisions": 6, "total_triggered": 4, "trigger_rate": 0.667,
         "severity_counts": {"critical": 1, "high": 2, "medium": 1},
@@ -259,8 +260,8 @@ def test_render_overview_section():
 
 
 def test_render_case_section_has_three_layers(fixtures_dir: Path):
-    from skymirror.agents.report_helpers import load_oa_log
-    from skymirror.agents.report_templates import render_case
+    from skymirror.tools.daily_report.loader import load_oa_log
+    from skymirror.tools.daily_report.rendering import render_case
     records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
     case = records[1]  # the critical collision
     md = render_case(case, index=1)
@@ -278,7 +279,7 @@ def test_render_case_section_has_three_layers(fixtures_dir: Path):
 # ---------------------------------------------------------------------------
 
 def test_render_empty_day_report_contains_self_diagnostic():
-    from skymirror.agents.report_templates import render_empty_day_report
+    from skymirror.tools.daily_report.rendering import render_empty_day_report
     md = render_empty_day_report(date(2026, 4, 12), case_label="A")
     assert "NOT necessarily normal" in md
     assert "Verification checklist" in md
@@ -286,8 +287,8 @@ def test_render_empty_day_report_contains_self_diagnostic():
 
 
 def test_render_appendix_compact_list(fixtures_dir: Path):
-    from skymirror.agents.report_helpers import load_oa_log
-    from skymirror.agents.report_templates import render_appendix_section
+    from skymirror.tools.daily_report.loader import load_oa_log
+    from skymirror.tools.daily_report.rendering import render_appendix_section
     records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
     triggered = [r for r in records if r.get("is_emergency")]
     featured_ids = {triggered[0]["decision_id"]}
@@ -297,7 +298,7 @@ def test_render_appendix_compact_list(fixtures_dir: Path):
 
 
 def test_render_system_profile_section_has_metrics():
-    from skymirror.agents.report_templates import render_system_profile_section
+    from skymirror.tools.daily_report.rendering import render_system_profile_section
     profile = {
         "expert_activation_counts": {"order_expert": 3, "safety_expert": 1, "environment_expert": 2},
         "fallback_count": 1, "fallback_rate": 0.1667,
@@ -317,7 +318,7 @@ def test_render_system_profile_section_has_metrics():
 # ---------------------------------------------------------------------------
 
 def test_build_tldr_prompt_embeds_facts_without_raw_records():
-    from skymirror.agents.report_templates import build_tldr_prompt
+    from skymirror.tools.daily_report.rendering import build_tldr_prompt
     facts = {
         "total_triggered": 127, "peak_hour": 18,
         "dominant_type": "traffic_violation", "dominant_type_ratio": 0.70,

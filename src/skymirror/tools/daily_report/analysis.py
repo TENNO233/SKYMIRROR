@@ -1,79 +1,18 @@
-"""Pure-function helpers for Daily Explication Report.
+"""Aggregate-statistics and case-selection tools for the Daily Explication Report Agent.
 
-This module contains ONLY pure functions — no I/O side effects beyond
-reading files and no global state. This makes the agent trivially unit-testable.
+Responsible for:
+- Computing overview / temporal / system-profile statistics from OA decision records.
+- Selecting representative cases via Top-Severity + Diversity Dedup.
+
+Used by: `skymirror.agents.report_generator`.
 """
 from __future__ import annotations
 
-import json
-import logging
 from collections import Counter
-from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
-SGT = timezone(timedelta(hours=8))
-
-
-# ---------------------------------------------------------------------------
-# Loader
-# ---------------------------------------------------------------------------
-
-def load_oa_log(
-    oa_log_dir: Path,
-    target_date: date,
-    *,
-    filename_stem_override: str | None = None,
-) -> list[dict[str, Any]]:
-    """Load all OA decision records for `target_date` (SGT day).
-
-    Args:
-        oa_log_dir: Directory holding `YYYY-MM-DD.jsonl` files.
-        target_date: The SGT date whose log should be loaded.
-        filename_stem_override: For tests — use a different filename
-            (without `.jsonl`) instead of the date-derived one.
-
-    Returns:
-        List of parsed decision records. Empty list if the file is
-        missing or empty. Malformed JSON lines are skipped with a warning.
-    """
-    oa_log_dir = Path(oa_log_dir)
-    stem = filename_stem_override or target_date.isoformat()
-    path = oa_log_dir / f"{stem}.jsonl"
-
-    if not path.exists():
-        logger.warning("OA log file not found: %s", path)
-        return []
-
-    records: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as f:
-        for lineno, raw in enumerate(f, start=1):
-            line = raw.strip()
-            if not line:
-                continue
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError as exc:
-                logger.warning(
-                    "Skipping malformed line %d in %s: %s", lineno, path, exc
-                )
-    return records
-
-
-# ---------------------------------------------------------------------------
-# Date / timezone helpers
-# ---------------------------------------------------------------------------
-
-def yesterday_sgt() -> date:
-    """Return the SGT date one day before the current SGT day.
-
-    Uses Singapore Time (UTC+8). At 07:59 UTC on 2026-04-13 (= 15:59 SGT on
-    2026-04-13), returns 2026-04-12.
-    """
-    now_sgt = datetime.now(SGT)
-    return (now_sgt - timedelta(days=1)).date()
+from skymirror.tools.daily_report.loader import SGT
 
 
 # ---------------------------------------------------------------------------
@@ -116,8 +55,8 @@ def compute_temporal_stats(records: list[dict[str, Any]]) -> dict[str, Any]:
     All times are converted to SGT before bucketing into hours.
 
     Returns a dict with:
-        hourly_triggered:  dict[int, int] — SGT hour (0-23) -> triggered count
-        hourly_total:      dict[int, int] — SGT hour -> all-decisions count
+        hourly_triggered:  dict[int, int] — SGT hour (0-23) → triggered count
+        hourly_total:      dict[int, int] — SGT hour → all-decisions count
         peak_hour:         int | None    — SGT hour with the most triggers (None if no triggers)
         morning_dominant_type:  str | None  — most common emergency_type during 07-09 SGT, if any
         evening_dominant_type:  str | None  — most common emergency_type during 17-20 SGT, if any
@@ -178,7 +117,7 @@ def compute_system_profile_stats(records: list[dict[str, Any]]) -> dict[str, Any
     fallback_count = 0
     rag_scores: list[float] = []
     reg_codes: Counter[str] = Counter()
-    buckets = {"high_\u22650.9": 0, "mid_0.7\u20130.89": 0, "low_<0.7": 0}
+    buckets = {"high_≥0.9": 0, "mid_0.7–0.89": 0, "low_<0.7": 0}
 
     for r in records:
         experts = (r.get("routing_trace") or {}).get("activated_experts") or []
@@ -202,9 +141,9 @@ def compute_system_profile_stats(records: list[dict[str, Any]]) -> dict[str, Any
             except (TypeError, ValueError):
                 conf = 0.0
             if conf >= 0.9:
-                buckets["high_\u22650.9"] += 1
+                buckets["high_≥0.9"] += 1
             elif conf >= 0.7:
-                buckets["mid_0.7\u20130.89"] += 1
+                buckets["mid_0.7–0.89"] += 1
             else:
                 buckets["low_<0.7"] += 1
 
