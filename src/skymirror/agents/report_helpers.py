@@ -60,3 +60,17 @@ def load_oa_log(
                     "Skipping malformed line %d in %s: %s", lineno, path, exc
                 )
     return records
+
+
+# ---------------------------------------------------------------------------
+# Date / timezone helpers
+# ---------------------------------------------------------------------------
+
+def yesterday_sgt() -> date:
+    """Return the SGT date one day before the current SGT day.
+
+    Uses Singapore Time (UTC+8). At 07:59 UTC on 2026-04-13 (= 15:59 SGT on
+    2026-04-13), returns 2026-04-12.
+    """
+    now_sgt = datetime.now(SGT)
+    return (now_sgt - timedelta(days=1)).date()
