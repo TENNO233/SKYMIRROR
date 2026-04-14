@@ -371,3 +371,70 @@ def test_generate_alerts_returns_list_to_oa(tmp_path, mock_llm):
     assert isinstance(result, list)
     assert all(isinstance(a, dict) for a in result)
     assert all("alert_id" in a for a in result)
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Integration test with fixture data
+# ---------------------------------------------------------------------------
+
+def test_end_to_end_single_expert_fixture(tmp_path, alert_fixtures, mock_llm):
+    """End-to-end: single expert fixture produces one alert with all fields."""
+    from skymirror.agents.alert_manager import generate_alerts
+    fixture = alert_fixtures["single_expert"]
+    alerts = generate_alerts(
+        expert_results=fixture["expert_results"],
+        image_path=fixture["image_path"],
+        rag_citations=fixture["rag_citations"],
+        output_dir=tmp_path,
+    )
+    assert len(alerts) == 1
+    alert = alerts[0]
+    # Schema completeness
+    for key in ("alert_id", "domain", "sub_type", "severity", "message",
+                "source_expert", "evidence", "regulations", "department",
+                "timestamp", "image_path"):
+        assert key in alert, f"Missing key: {key}"
+    assert alert["domain"] == "traffic"
+    assert alert["department"] == "Traffic Police"
+    assert len(alert["regulations"]) == 1
+    assert alert["regulations"][0]["regulation_code"] == "RTA Section 120(3)"
+
+    # Dispatch files exist
+    assert (tmp_path / f"{alert['alert_id']}.json").exists()
+    assert (tmp_path / "dispatch_log.jsonl").exists()
+
+
+def test_end_to_end_multi_expert_fixture(tmp_path, alert_fixtures, mock_llm):
+    """End-to-end: multi-expert fixture produces two alerts to different departments."""
+    from skymirror.agents.alert_manager import generate_alerts
+    fixture = alert_fixtures["multi_expert"]
+    alerts = generate_alerts(
+        expert_results=fixture["expert_results"],
+        image_path=fixture["image_path"],
+        rag_citations=fixture["rag_citations"],
+        output_dir=tmp_path,
+    )
+    assert len(alerts) == 2
+    departments = {a["department"] for a in alerts}
+    assert "Emergency Management Center" in departments
+    assert "Municipal & Meteorological Duty Office" in departments
+
+    # Two alert files + one dispatch log
+    import json
+    log_file = tmp_path / "dispatch_log.jsonl"
+    lines = [l for l in log_file.read_text().strip().split("\n") if l]
+    assert len(lines) == 2
+
+
+def test_end_to_end_empty_findings_fixture(tmp_path, alert_fixtures, mock_llm):
+    """End-to-end: empty findings fixture produces no alerts."""
+    from skymirror.agents.alert_manager import generate_alerts
+    fixture = alert_fixtures["empty_findings"]
+    alerts = generate_alerts(
+        expert_results=fixture["expert_results"],
+        image_path=fixture["image_path"],
+        rag_citations=fixture["rag_citations"],
+        output_dir=tmp_path,
+    )
+    assert alerts == []
+    assert not (tmp_path / "dispatch_log.jsonl").exists()
