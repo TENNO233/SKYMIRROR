@@ -183,3 +183,83 @@ def test_render_alert_unknown_expert_uses_unknown_domain():
     )
     assert alert["domain"] == "unknown"
     assert alert["department"] == "General Operations"
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Dispatcher
+# ---------------------------------------------------------------------------
+
+def test_dispatch_writes_alert_json(tmp_path):
+    from skymirror.tools.alert.dispatcher import dispatch
+    alert = {
+        "alert_id": "abc123",
+        "domain": "traffic",
+        "severity": "high",
+        "department": "Traffic Police",
+    }
+    dispatch(alert, output_dir=tmp_path)
+
+    alert_file = tmp_path / "abc123.json"
+    assert alert_file.exists()
+    import json
+    data = json.loads(alert_file.read_text())
+    assert data["alert_id"] == "abc123"
+
+
+def test_dispatch_writes_dispatch_log(tmp_path):
+    from skymirror.tools.alert.dispatcher import dispatch
+    alert = {
+        "alert_id": "abc123",
+        "domain": "traffic",
+        "severity": "high",
+        "department": "Traffic Police",
+    }
+    dispatch(alert, output_dir=tmp_path)
+
+    log_file = tmp_path / "dispatch_log.jsonl"
+    assert log_file.exists()
+    import json
+    entry = json.loads(log_file.read_text().strip())
+    assert entry["alert_id"] == "abc123"
+    assert entry["department"] == "Traffic Police"
+    assert entry["status"] == "simulated"
+    assert "dispatched_at" in entry
+
+
+def test_dispatch_is_idempotent(tmp_path):
+    from skymirror.tools.alert.dispatcher import dispatch
+    alert = {
+        "alert_id": "abc123",
+        "domain": "traffic",
+        "severity": "high",
+        "department": "Traffic Police",
+    }
+    dispatch(alert, output_dir=tmp_path)
+    dispatch(alert, output_dir=tmp_path)  # second call
+
+    # Alert file written once
+    import json
+    alert_file = tmp_path / "abc123.json"
+    assert alert_file.exists()
+
+    # Dispatch log has only one entry
+    log_file = tmp_path / "dispatch_log.jsonl"
+    lines = [l for l in log_file.read_text().strip().split("\n") if l]
+    assert len(lines) == 1
+
+
+def test_dispatch_multiple_alerts_appends_log(tmp_path):
+    from skymirror.tools.alert.dispatcher import dispatch
+    for i, dept in enumerate(["Traffic Police", "Emergency Management Center"]):
+        dispatch(
+            {"alert_id": f"id_{i}", "domain": "traffic", "severity": "high", "department": dept},
+            output_dir=tmp_path,
+        )
+
+    import json
+    log_file = tmp_path / "dispatch_log.jsonl"
+    lines = [l for l in log_file.read_text().strip().split("\n") if l]
+    assert len(lines) == 2
+    entries = [json.loads(l) for l in lines]
+    assert entries[0]["department"] == "Traffic Police"
+    assert entries[1]["department"] == "Emergency Management Center"
