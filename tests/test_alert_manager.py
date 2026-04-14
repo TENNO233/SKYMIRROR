@@ -113,3 +113,73 @@ def test_build_classification_prompt_includes_domain_and_findings():
     assert "Collision" in prompt
     assert "critical" in prompt
     assert "collision" in prompt or "pedestrian_intrusion" in prompt  # enum values present
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Rendering
+# ---------------------------------------------------------------------------
+
+def test_render_alert_produces_complete_dict():
+    from skymirror.tools.alert.rendering import render_alert
+    alert = render_alert(
+        expert_name="order_expert",
+        classification={"sub_type": "red_light", "severity": "high", "message": "Red light violation"},
+        findings=[{"description": "Running red light", "confidence": 0.87}],
+        regulations=[{"source": "RTA", "regulation_code": "S120", "excerpt": "...", "relevance_score": 0.89}],
+        image_path="data/frames/cam4798_20260412T083000.jpg",
+    )
+    assert alert["domain"] == "traffic"
+    assert alert["sub_type"] == "red_light"
+    assert alert["severity"] == "high"
+    assert alert["message"] == "Red light violation"
+    assert alert["source_expert"] == "order_expert"
+    assert alert["department"] == "Traffic Police"
+    assert alert["image_path"] == "data/frames/cam4798_20260412T083000.jpg"
+    assert len(alert["evidence"]) == 1
+    assert alert["evidence"][0] == "Running red light"
+    assert len(alert["regulations"]) == 1
+    assert "alert_id" in alert
+    assert "timestamp" in alert
+
+
+def test_render_alert_deterministic_id():
+    from skymirror.tools.alert.rendering import render_alert
+    kwargs = dict(
+        expert_name="safety_expert",
+        classification={"sub_type": "collision", "severity": "critical", "message": "Crash"},
+        findings=[{"description": "Collision", "confidence": 0.94}],
+        regulations=[],
+        image_path="data/frames/cam4798_20260412T061530.jpg",
+    )
+    a1 = render_alert(**kwargs)
+    a2 = render_alert(**kwargs)
+    assert a1["alert_id"] == a2["alert_id"]
+
+
+def test_render_alert_different_inputs_different_ids():
+    from skymirror.tools.alert.rendering import render_alert
+    a1 = render_alert(
+        expert_name="order_expert",
+        classification={"sub_type": "red_light", "severity": "high", "message": "msg"},
+        findings=[], regulations=[],
+        image_path="frame_A.jpg",
+    )
+    a2 = render_alert(
+        expert_name="safety_expert",
+        classification={"sub_type": "collision", "severity": "high", "message": "msg"},
+        findings=[], regulations=[],
+        image_path="frame_A.jpg",
+    )
+    assert a1["alert_id"] != a2["alert_id"]
+
+
+def test_render_alert_unknown_expert_uses_unknown_domain():
+    from skymirror.tools.alert.rendering import render_alert
+    alert = render_alert(
+        expert_name="unknown_expert",
+        classification={"sub_type": "other", "severity": "low", "message": "msg"},
+        findings=[], regulations=[],
+        image_path="frame.jpg",
+    )
+    assert alert["domain"] == "unknown"
+    assert alert["department"] == "General Operations"
