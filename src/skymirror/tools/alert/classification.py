@@ -12,6 +12,7 @@ import json
 import logging
 from typing import Any, Literal
 
+from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
 from skymirror.tools.alert.constants import SUB_TYPE_MAP
@@ -68,7 +69,6 @@ def classify(
     try:
         llm = _get_classification_llm()
         structured_llm = llm.with_structured_output(AlertClassification)
-        from langchain_core.messages import HumanMessage
         result = structured_llm.invoke([HumanMessage(content=prompt)])
 
         sub_type = result.sub_type

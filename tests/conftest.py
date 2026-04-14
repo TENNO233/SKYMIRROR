@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for Daily Explication Report tests."""
+"""Shared pytest fixtures for SKYMIRROR agent tests."""
 from __future__ import annotations
 
 import types
