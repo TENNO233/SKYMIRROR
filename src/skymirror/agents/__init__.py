@@ -15,7 +15,7 @@ from skymirror.agents.experts import (
     safety_expert_node,
     environment_expert_node,
 )
-from skymirror.agents.alert_manager import alert_manager_node
+from skymirror.agents.alert_manager import generate_alerts
 
 __all__ = [
     "vlm_agent_node",
@@ -23,5 +23,5 @@ __all__ = [
     "order_expert_node",
     "safety_expert_node",
     "environment_expert_node",
-    "alert_manager_node",
+    "generate_alerts",
 ]

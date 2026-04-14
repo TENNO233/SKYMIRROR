@@ -1,76 +1,110 @@
-"""
-alert_manager.py — Alert Generation & Dispatch Agent
-======================================================
-Responsibility: Consume the aggregated `expert_results` and produce a
-structured list of alerts stored in `state["alerts"]`.  Optionally dispatch
-alerts to external systems (webhook, message queue, monitoring platform).
+"""Alert Generation Agent — Orchestration Entry Point
+=====================================================
 
-Implementation notes (TODO)
----------------------------
-- Input:  `state["expert_results"]`  (merged dict from all active experts)
-- Output: `state["alerts"]`          (list of alert dicts)
-- Alert schema (suggested):
-    {
-        "severity":      "low" | "medium" | "high" | "critical",
-        "type":          "traffic_violation" | "safety_incident" | "env_hazard",
-        "message":       str,
-        "source_expert": str,
-        "timestamp":     ISO-8601 str,
-        "image_path":    str,
-    }
-- Dispatch options: HTTP webhook (httpx), Kafka topic, SNS, or a DB write.
-- Idempotency: use `image_path` + expert name as a deduplication key.
-"""
+Identity
+--------
+I am SKYMIRROR's alert generation surface. When OA determines that expert
+analysis results warrant an alert, it calls me with expert_results,
+image_path, and optional context. I orchestrate tools to classify, render,
+and dispatch structured alerts.
 
+I am NOT a fixed pipeline node. I am an independent agent invoked on-demand
+by OA (Orchestrator Agent).
+
+Tasks
+-----
+1. For each expert in expert_results: skip if findings are empty.
+2. Call classification tool to determine sub_type, severity, and message.
+3. Call rendering tool to assemble the complete alert dict with evidence
+   and regulation citations (XAI: process transparency + source attribution).
+4. Call dispatcher tool to write alert files and dispatch log.
+5. Return the list of generated alerts to OA.
+
+Tools
+-----
+- ``skymirror.tools.alert.classification`` : LLM-based event classification
+- ``skymirror.tools.alert.rendering``      : template-based alert dict assembly
+- ``skymirror.tools.alert.dispatcher``     : simulated file-based dispatch
+"""
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
-from skymirror.graph.state import SkymirrorState
+from skymirror.tools.alert.classification import classify
+from skymirror.tools.alert.constants import DOMAIN_MAP
+from skymirror.tools.alert.dispatcher import dispatch
+from skymirror.tools.alert.rendering import render_alert
 
 logger = logging.getLogger(__name__)
 
 
-def alert_manager_node(state: SkymirrorState) -> dict[str, Any]:
-    """
-    LangGraph node function for the Alert Manager.
+def generate_alerts(
+    expert_results: dict[str, Any],
+    image_path: str,
+    rag_citations: list[dict[str, Any]],
+    output_dir: Path | str = "data/alerts",
+    metadata: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Generate and dispatch alerts from expert analysis results.
+
+    Called by OA when it determines alerting is needed. This function
+    contains zero business logic — it only sequences tool calls.
 
     Args:
-        state: Fully or partially populated pipeline state.
-               `state["expert_results"]` contains all expert findings.
+        expert_results: Merged dict from activated experts.
+            ``{"order_expert": {"findings": [...], "severity": "high", ...}, ...}``
+        image_path: Source camera frame path.
+        rag_citations: RAG references from expert analysis (passed through
+            to alert for XAI source attribution).
+        output_dir: Directory for alert JSON files and dispatch log.
+        metadata: Optional diagnostic context from OA (not processed).
 
     Returns:
-        Partial state dict with `alerts` list populated.
+        List of generated alert dicts (empty list if no actionable findings).
     """
-    expert_results: dict[str, Any] = state.get("expert_results", {})
+    if not expert_results:
+        logger.info("alert_manager: No expert results provided; returning empty.")
+        return []
+
     logger.info(
         "alert_manager: Processing results from %d expert(s): %s",
         len(expert_results),
         list(expert_results.keys()),
     )
 
-    # TODO: Implement alert synthesis and dispatch.
-    # Example skeleton:
-    #
-    # import datetime, httpx, os
-    # alerts = []
-    # for expert_name, findings in expert_results.items():
-    #     for finding in findings.get("findings", []):
-    #         alert = {
-    #             "severity": findings.get("severity", "low"),
-    #             "type": _EXPERT_TO_TYPE[expert_name],
-    #             "message": finding,
-    #             "source_expert": expert_name,
-    #             "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-    #             "image_path": state.get("image_path", ""),
-    #         }
-    #         alerts.append(alert)
-    #
-    # webhook_url = os.getenv("ALERT_WEBHOOK_URL")
-    # if webhook_url and alerts:
-    #     httpx.post(webhook_url, json=alerts, timeout=5.0)
-    #
-    # return {"alerts": alerts}
+    alerts: list[dict[str, Any]] = []
 
-    raise NotImplementedError("alert_manager_node is not yet implemented.")
+    for expert_name, expert_data in expert_results.items():
+        findings = expert_data.get("findings", [])
+        if not findings:
+            logger.info("alert_manager: Skipping %s (no findings).", expert_name)
+            continue
+
+        domain = DOMAIN_MAP.get(expert_name, "unknown")
+        expert_severity = expert_data.get("severity", "medium")
+
+        # Tool 1: Classify
+        classification = classify(
+            domain=domain,
+            findings=findings,
+            expert_severity=expert_severity,
+        )
+
+        # Tool 2: Render
+        alert = render_alert(
+            expert_name=expert_name,
+            classification=classification,
+            findings=findings,
+            regulations=rag_citations,
+            image_path=image_path,
+        )
+
+        # Tool 3: Dispatch
+        dispatch(alert, output_dir=output_dir)
+
+        alerts.append(alert)
+
+    logger.info("alert_manager: Generated %d alert(s).", len(alerts))
+    return alerts

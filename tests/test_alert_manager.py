@@ -263,3 +263,111 @@ def test_dispatch_multiple_alerts_appends_log(tmp_path):
     entries = [json.loads(l) for l in lines]
     assert entries[0]["department"] == "Traffic Police"
     assert entries[1]["department"] == "Emergency Management Center"
+
+
+# ---------------------------------------------------------------------------
+# Task 6: Alert Manager (agent orchestration)
+# ---------------------------------------------------------------------------
+
+def test_generate_alerts_single_expert(tmp_path, mock_llm):
+    from skymirror.agents.alert_manager import generate_alerts
+    expert_results = {
+        "order_expert": {
+            "findings": [{"description": "Running red light", "confidence": 0.87}],
+            "severity": "high",
+            "confidence": 0.87,
+        }
+    }
+    rag_citations = [
+        {"source": "RTA", "regulation_code": "S120", "excerpt": "...", "relevance_score": 0.89}
+    ]
+    alerts = generate_alerts(
+        expert_results=expert_results,
+        image_path="data/frames/cam4798.jpg",
+        rag_citations=rag_citations,
+        output_dir=tmp_path,
+    )
+    assert len(alerts) == 1
+    alert = alerts[0]
+    assert alert["domain"] == "traffic"
+    assert alert["source_expert"] == "order_expert"
+    assert alert["department"] == "Traffic Police"
+    assert len(alert["evidence"]) == 1
+    assert len(alert["regulations"]) == 1
+    # File was dispatched
+    assert (tmp_path / f"{alert['alert_id']}.json").exists()
+
+
+def test_generate_alerts_multi_expert(tmp_path, mock_llm):
+    from skymirror.agents.alert_manager import generate_alerts
+    expert_results = {
+        "safety_expert": {
+            "findings": [{"description": "Collision", "confidence": 0.94}],
+            "severity": "critical",
+            "confidence": 0.94,
+        },
+        "environment_expert": {
+            "findings": [{"description": "Debris on road", "confidence": 0.71}],
+            "severity": "medium",
+            "confidence": 0.71,
+        },
+    }
+    alerts = generate_alerts(
+        expert_results=expert_results,
+        image_path="data/frames/cam4798.jpg",
+        rag_citations=[],
+        output_dir=tmp_path,
+    )
+    assert len(alerts) == 2
+    domains = {a["domain"] for a in alerts}
+    assert domains == {"safety", "environment"}
+
+
+def test_generate_alerts_skips_empty_findings(tmp_path, mock_llm):
+    from skymirror.agents.alert_manager import generate_alerts
+    expert_results = {
+        "order_expert": {
+            "findings": [],
+            "severity": "low",
+            "confidence": 0.0,
+        }
+    }
+    alerts = generate_alerts(
+        expert_results=expert_results,
+        image_path="data/frames/cam4798.jpg",
+        rag_citations=[],
+        output_dir=tmp_path,
+    )
+    assert len(alerts) == 0
+
+
+def test_generate_alerts_empty_expert_results(tmp_path, mock_llm):
+    from skymirror.agents.alert_manager import generate_alerts
+    alerts = generate_alerts(
+        expert_results={},
+        image_path="data/frames/cam4798.jpg",
+        rag_citations=[],
+        output_dir=tmp_path,
+    )
+    assert alerts == []
+
+
+def test_generate_alerts_returns_list_to_oa(tmp_path, mock_llm):
+    """Verify the contract: generate_alerts returns a plain list of dicts."""
+    from skymirror.agents.alert_manager import generate_alerts
+    expert_results = {
+        "order_expert": {
+            "findings": [{"description": "Speeding", "confidence": 0.8}],
+            "severity": "medium",
+            "confidence": 0.8,
+        }
+    }
+    result = generate_alerts(
+        expert_results=expert_results,
+        image_path="frame.jpg",
+        rag_citations=[],
+        output_dir=tmp_path,
+    )
+    assert isinstance(result, list)
+    assert all(isinstance(a, dict) for a in result)
+    assert all("alert_id" in a for a in result)
