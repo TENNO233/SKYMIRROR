@@ -38,3 +38,78 @@ def test_department_map_covers_all_domains():
     # Values are non-empty strings
     for dept in DEPARTMENT_MAP.values():
         assert isinstance(dept, str) and len(dept) > 0
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Classification
+# ---------------------------------------------------------------------------
+
+def test_classify_returns_valid_structure(mock_llm):
+    from skymirror.tools.alert.classification import classify
+    result = classify(
+        domain="traffic",
+        findings=[{"description": "Running red light", "confidence": 0.87}],
+        expert_severity="high",
+    )
+    assert "sub_type" in result
+    assert "severity" in result
+    assert "message" in result
+    assert result["severity"] in ("low", "medium", "high", "critical")
+
+
+def test_classify_falls_back_on_llm_failure(monkeypatch):
+    from skymirror.tools.alert import classification as cls_mod
+
+    class _Broken:
+        def with_structured_output(self, schema):
+            return self
+        def invoke(self, *_a, **_kw):
+            raise RuntimeError("API down")
+
+    monkeypatch.setattr(cls_mod, "_get_classification_llm", lambda: _Broken())
+
+    result = cls_mod.classify(
+        domain="traffic",
+        findings=[{"description": "Running red light", "confidence": 0.87}],
+        expert_severity="high",
+    )
+    assert result["sub_type"] == "other"
+    assert result["severity"] == "high"  # falls back to expert_severity
+    assert "Running red light" in result["message"]
+
+
+def test_classify_forces_other_on_invalid_sub_type(monkeypatch):
+    from skymirror.tools.alert import classification as cls_mod
+
+    class _FakeClassification:
+        sub_type: str = "INVALID_TYPE"
+        severity: str = "medium"
+        message: str = "Some message"
+
+    class _FakeLLM:
+        def with_structured_output(self, schema):
+            return self
+        def invoke(self, messages):
+            return _FakeClassification()
+
+    monkeypatch.setattr(cls_mod, "_get_classification_llm", lambda: _FakeLLM())
+
+    result = cls_mod.classify(
+        domain="traffic",
+        findings=[{"description": "Something", "confidence": 0.5}],
+        expert_severity="medium",
+    )
+    assert result["sub_type"] == "other"
+
+
+def test_build_classification_prompt_includes_domain_and_findings():
+    from skymirror.tools.alert.classification import build_classification_prompt
+    prompt = build_classification_prompt(
+        domain="safety",
+        findings=[{"description": "Collision", "confidence": 0.9}],
+        expert_severity="critical",
+    )
+    assert "safety" in prompt
+    assert "Collision" in prompt
+    assert "critical" in prompt
+    assert "collision" in prompt or "pedestrian_intrusion" in prompt  # enum values present
