@@ -1,6 +1,17 @@
 """Tests for Alert Generation Agent."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import pytest
+
+
+@pytest.fixture
+def alert_fixtures(fixtures_dir: Path) -> dict:
+    """Load alert test fixtures."""
+    return json.loads((fixtures_dir / "alert_expert_results.json").read_text())
+
 
 # ---------------------------------------------------------------------------
 # Task 1: Constants

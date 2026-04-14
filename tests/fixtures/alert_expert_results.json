@@ -1,0 +1,60 @@
+{
+  "single_expert": {
+    "expert_results": {
+      "order_expert": {
+        "findings": [
+          {"description": "Running red light at intersection A", "confidence": 0.87}
+        ],
+        "severity": "high",
+        "confidence": 0.87
+      }
+    },
+    "image_path": "data/frames/cam4798_20260412T083000.jpg",
+    "rag_citations": [
+      {
+        "source": "Singapore Road Traffic Act",
+        "regulation_code": "RTA Section 120(3)",
+        "excerpt": "Any person who fails to conform to a red traffic light signal shall be guilty of an offence.",
+        "relevance_score": 0.89
+      }
+    ]
+  },
+  "multi_expert": {
+    "expert_results": {
+      "safety_expert": {
+        "findings": [
+          {"description": "Multi-vehicle collision with rollover", "confidence": 0.94}
+        ],
+        "severity": "critical",
+        "confidence": 0.94
+      },
+      "environment_expert": {
+        "findings": [
+          {"description": "Debris on roadway", "confidence": 0.71}
+        ],
+        "severity": "medium",
+        "confidence": 0.71
+      }
+    },
+    "image_path": "data/frames/cam4798_20260412T061530.jpg",
+    "rag_citations": [
+      {
+        "source": "Singapore Emergency Response Protocol",
+        "regulation_code": "ERP-3.2",
+        "excerpt": "Multi-vehicle collision with overturn requires immediate dispatch.",
+        "relevance_score": 0.91
+      }
+    ]
+  },
+  "empty_findings": {
+    "expert_results": {
+      "order_expert": {
+        "findings": [],
+        "severity": "low",
+        "confidence": 0.0
+      }
+    },
+    "image_path": "data/frames/cam4798_20260412T031212.jpg",
+    "rag_citations": []
+  }
+}
