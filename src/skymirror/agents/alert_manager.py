@@ -28,7 +28,10 @@ Tools
 """
 from __future__ import annotations
 
+import argparse
+import json
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -108,3 +111,75 @@ def generate_alerts(
 
     logger.info("alert_manager: Generated %d alert(s).", len(alerts))
     return alerts
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+_FIXTURES_PATH = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "alert_expert_results.json"
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="skymirror.agents.alert_manager",
+        description="Run the SKYMIRROR Alert Generation Agent on sample data.",
+    )
+    parser.add_argument(
+        "--fixture",
+        choices=["single_expert", "multi_expert", "empty_findings"],
+        default="single_expert",
+        help="Which test fixture scenario to run (default: single_expert).",
+    )
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Path to a custom JSON file with expert_results, image_path, rag_citations.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("data/alerts"),
+        help="Directory for alert output files (default: data/alerts).",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    args = _parse_args(argv)
+
+    if args.input:
+        data = json.loads(args.input.read_text(encoding="utf-8"))
+    else:
+        if not _FIXTURES_PATH.exists():
+            print(f"ERROR: Fixture file not found: {_FIXTURES_PATH}", file=sys.stderr)
+            return 1
+        all_fixtures = json.loads(_FIXTURES_PATH.read_text(encoding="utf-8"))
+        data = all_fixtures[args.fixture]
+
+    alerts = generate_alerts(
+        expert_results=data["expert_results"],
+        image_path=data["image_path"],
+        rag_citations=data.get("rag_citations", []),
+        output_dir=args.output_dir,
+    )
+
+    print(f"\n{'=' * 60}")
+    print(f"Alert Generation Agent — {len(alerts)} alert(s) generated")
+    print(f"{'=' * 60}")
+    for i, alert in enumerate(alerts, 1):
+        print(f"\n--- Alert {i} ---")
+        print(json.dumps(alert, indent=2, ensure_ascii=False))
+
+    if alerts:
+        print(f"\nFiles written to: {args.output_dir}/")
+    else:
+        print("\nNo alerts generated (no actionable findings).")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
