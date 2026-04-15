@@ -891,3 +891,62 @@ class TestEvaluateAlerts:
         report = evaluate_alerts(tmp_path, radius_m=500.0)
         assert report["total_alerts"] == 0
         assert report["corroborated"] == 0
+        assert report["lta_undetected"] == []
+
+    def test_evaluate_finds_undetected_lta_events(self, tmp_path, fixtures_dir):
+        """Reverse lookup: LTA events near a covered camera that no alert matched."""
+        # Alert with only 1 match — but LTA fixture has more events in the area
+        alert = {
+            "alert_id": "abc123",
+            "domain": "traffic",
+            "image_path": "data/frames/cam4798_20260412T083000.jpg",
+            "lta_corroboration": {
+                "api_available": True,
+                "matches": [
+                    # agent only corroborated the Accident, missed other nearby events
+                    {"match_type": "location_and_domain", "event_type": "Accident",
+                     "description": "(15/4)08:25 Accident on Ayer Rajah Expressway (AYE) towards Tuas after Clementi Ave 6 Exit.",
+                     "distance_m": 25.0, "source_api": "TrafficIncidents"},
+                ],
+                "match_summary": {"total": 1, "location_and_domain": 1, "location_only": 0},
+            },
+        }
+        (tmp_path / "abc123.json").write_text(json.dumps(alert))
+
+        # Mock LTA + data.gov.sg responses so undetected reverse-lookup can run
+        lta_sample = json.loads((fixtures_dir / "lta_responses.json").read_text())
+
+        def mock_get(url, **kwargs):
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.raise_for_status = MagicMock()
+            if "data.gov.sg" in url:
+                mock_resp.json.return_value = lta_sample["camera_api"]
+            elif "TrafficIncidents" in url:
+                mock_resp.json.return_value = lta_sample["traffic_incidents"]
+            elif "FaultyTrafficLights" in url:
+                mock_resp.json.return_value = lta_sample["faulty_traffic_lights"]
+            elif "RoadWorks" in url:
+                mock_resp.json.return_value = lta_sample["road_works"]
+            elif "Flood" in url:
+                mock_resp.json.return_value = lta_sample["pub_flood_alerts"]
+            else:
+                mock_resp.json.return_value = {"value": []}
+            return mock_resp
+
+        with patch("skymirror.tools.alert.lta_lookup.httpx") as mock_httpx:
+            mock_httpx.get.side_effect = mock_get
+            with patch.dict(os.environ, {"LTA_API_KEY": "test-key"}):
+                report = evaluate_alerts(tmp_path, radius_m=500.0)
+
+        # The fixture has Accident (matched) + FaultyTrafficLights + RoadWorks near cam4798.
+        # The Vehicle Breakdown at (1.446, 103.771) and Road Block at (1.35, 103.9)
+        # are far away and should be filtered out by radius.
+        undetected = report["lta_undetected"]
+        assert len(undetected) >= 1  # at least the FaultyTrafficLights event
+        for u in undetected:
+            assert "nearest_camera" in u
+            assert u["nearest_camera"] == "4798"
+            assert u["distance_m"] <= 500.0
+            # The matched Accident should NOT appear in undetected
+            assert "Accident on Ayer Rajah" not in u["description"]
