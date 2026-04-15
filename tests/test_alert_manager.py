@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import json
+import math
+import os
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -438,3 +441,56 @@ def test_end_to_end_empty_findings_fixture(tmp_path, alert_fixtures, mock_llm):
     )
     assert alerts == []
     assert not (tmp_path / "dispatch_log.jsonl").exists()
+
+
+# =============================================================================
+# Task: LTA Lookup — Data Structures & Camera Resolution
+# =============================================================================
+
+from skymirror.tools.alert.lta_lookup import (
+    LtaEvent,
+    LtaMatch,
+    LtaCorroboration,
+    resolve_camera_location,
+)
+
+
+class TestResolveCamera:
+    """Tests for camera_id -> (lat, lng) resolution via data.gov.sg."""
+
+    def test_known_camera_returns_coords(self, fixtures_dir):
+        sample = json.loads((fixtures_dir / "lta_responses.json").read_text())
+        with patch("skymirror.tools.alert.lta_lookup.httpx") as mock_httpx:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = sample["camera_api"]
+            mock_resp.raise_for_status = MagicMock()
+            mock_httpx.get.return_value = mock_resp
+
+            result = resolve_camera_location("4798")
+
+        assert result is not None
+        lat, lng = result
+        assert abs(lat - 1.29531) < 1e-5
+        assert abs(lng - 103.871) < 1e-5
+
+    def test_unknown_camera_returns_none(self, fixtures_dir):
+        sample = json.loads((fixtures_dir / "lta_responses.json").read_text())
+        with patch("skymirror.tools.alert.lta_lookup.httpx") as mock_httpx:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = sample["camera_api"]
+            mock_resp.raise_for_status = MagicMock()
+            mock_httpx.get.return_value = mock_resp
+
+            result = resolve_camera_location("9999")
+
+        assert result is None
+
+    def test_api_failure_returns_none(self):
+        with patch("skymirror.tools.alert.lta_lookup.httpx") as mock_httpx:
+            mock_httpx.get.side_effect = Exception("Connection timeout")
+
+            result = resolve_camera_location("4798")
+
+        assert result is None
