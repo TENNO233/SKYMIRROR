@@ -811,3 +811,51 @@ class TestAlertManagerLtaIntegration:
 
         assert len(alerts) == 1
         assert alerts[0]["lta_corroboration"] is None
+
+
+from scripts.evaluate_alerts import evaluate_alerts, load_alerts
+
+
+class TestEvaluateAlerts:
+    """Tests for the evaluation script logic."""
+
+    def test_load_alerts_from_dir(self, tmp_path):
+        alert = {
+            "alert_id": "abc123",
+            "domain": "traffic",
+            "image_path": "data/frames/cam4798_20260412T083000.jpg",
+            "lta_corroboration": None,
+        }
+        (tmp_path / "abc123.json").write_text(json.dumps(alert))
+        (tmp_path / "dispatch_log.jsonl").write_text("")  # should be skipped
+
+        alerts = load_alerts(tmp_path)
+        assert len(alerts) == 1
+        assert alerts[0]["alert_id"] == "abc123"
+
+    def test_evaluate_with_existing_corroboration(self, tmp_path):
+        alert = {
+            "alert_id": "abc123",
+            "domain": "traffic",
+            "image_path": "data/frames/cam4798_20260412T083000.jpg",
+            "lta_corroboration": {
+                "api_available": True,
+                "matches": [
+                    {"match_type": "location_and_domain", "event_type": "Accident",
+                     "description": "Crash", "distance_m": 50.0, "source_api": "TrafficIncidents"}
+                ],
+                "match_summary": {"total": 1, "location_and_domain": 1, "location_only": 0},
+            },
+        }
+        (tmp_path / "abc123.json").write_text(json.dumps(alert))
+
+        report = evaluate_alerts(tmp_path, radius_m=500.0)
+
+        assert report["total_alerts"] == 1
+        assert report["corroborated"] == 1
+        assert report["uncorroborated"] == 0
+
+    def test_evaluate_empty_dir(self, tmp_path):
+        report = evaluate_alerts(tmp_path, radius_m=500.0)
+        assert report["total_alerts"] == 0
+        assert report["corroborated"] == 0
