@@ -19,9 +19,13 @@ from skymirror.tools.alert.lta_lookup import lookup_lta_events  # noqa: E402
 
 
 def load_alerts(alert_dir: Path) -> list[dict[str, Any]]:
-    """Load all alert JSON files from a directory (skip non-alert files)."""
+    """Load all alert JSON files from a directory tree (skip non-alert files).
+
+    Recurses into subdirectories — supports both flat (legacy) and
+    date-partitioned (`{date}/{alert_id}.json`) layouts transparently.
+    """
     alerts: list[dict[str, Any]] = []
-    for path in sorted(alert_dir.glob("*.json")):
+    for path in sorted(alert_dir.rglob("*.json")):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if "alert_id" in data:

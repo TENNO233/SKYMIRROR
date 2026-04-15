@@ -191,6 +191,10 @@ def test_render_alert_unknown_expert_uses_unknown_domain():
 # Task 5: Dispatcher
 # ---------------------------------------------------------------------------
 
+_TEST_TS = "2026-04-12T08:30:00Z"
+_TEST_DATE = "2026-04-12"
+
+
 def test_dispatch_writes_alert_json(tmp_path):
     from skymirror.tools.alert.dispatcher import dispatch
     alert = {
@@ -198,10 +202,11 @@ def test_dispatch_writes_alert_json(tmp_path):
         "domain": "traffic",
         "severity": "high",
         "department": "Traffic Police",
+        "timestamp": _TEST_TS,
     }
     dispatch(alert, output_dir=tmp_path)
 
-    alert_file = tmp_path / "abc123.json"
+    alert_file = tmp_path / _TEST_DATE / "abc123.json"
     assert alert_file.exists()
     import json
     data = json.loads(alert_file.read_text())
@@ -215,10 +220,11 @@ def test_dispatch_writes_dispatch_log(tmp_path):
         "domain": "traffic",
         "severity": "high",
         "department": "Traffic Police",
+        "timestamp": _TEST_TS,
     }
     dispatch(alert, output_dir=tmp_path)
 
-    log_file = tmp_path / "dispatch_log.jsonl"
+    log_file = tmp_path / _TEST_DATE / "dispatch_log.jsonl"
     assert log_file.exists()
     import json
     entry = json.loads(log_file.read_text().strip())
@@ -235,17 +241,18 @@ def test_dispatch_is_idempotent(tmp_path):
         "domain": "traffic",
         "severity": "high",
         "department": "Traffic Police",
+        "timestamp": _TEST_TS,
     }
     dispatch(alert, output_dir=tmp_path)
     dispatch(alert, output_dir=tmp_path)  # second call
 
     # Alert file written once
     import json
-    alert_file = tmp_path / "abc123.json"
+    alert_file = tmp_path / _TEST_DATE / "abc123.json"
     assert alert_file.exists()
 
     # Dispatch log has only one entry
-    log_file = tmp_path / "dispatch_log.jsonl"
+    log_file = tmp_path / _TEST_DATE / "dispatch_log.jsonl"
     lines = [l for l in log_file.read_text().strip().split("\n") if l]
     assert len(lines) == 1
 
@@ -254,17 +261,38 @@ def test_dispatch_multiple_alerts_appends_log(tmp_path):
     from skymirror.tools.alert.dispatcher import dispatch
     for i, dept in enumerate(["Traffic Police", "Emergency Management Center"]):
         dispatch(
-            {"alert_id": f"id_{i}", "domain": "traffic", "severity": "high", "department": dept},
+            {
+                "alert_id": f"id_{i}",
+                "domain": "traffic",
+                "severity": "high",
+                "department": dept,
+                "timestamp": _TEST_TS,
+            },
             output_dir=tmp_path,
         )
 
     import json
-    log_file = tmp_path / "dispatch_log.jsonl"
+    log_file = tmp_path / _TEST_DATE / "dispatch_log.jsonl"
     lines = [l for l in log_file.read_text().strip().split("\n") if l]
     assert len(lines) == 2
     entries = [json.loads(l) for l in lines]
     assert entries[0]["department"] == "Traffic Police"
     assert entries[1]["department"] == "Emergency Management Center"
+
+
+def test_dispatch_falls_back_to_today_when_timestamp_missing(tmp_path):
+    """Alerts without timestamp still get dispatched (to today's UTC date)."""
+    from datetime import datetime, timezone
+    from skymirror.tools.alert.dispatcher import dispatch
+    alert = {
+        "alert_id": "no_ts",
+        "domain": "traffic",
+        "severity": "low",
+        "department": "Traffic Police",
+    }
+    dispatch(alert, output_dir=tmp_path)
+    today = datetime.now(timezone.utc).date().isoformat()
+    assert (tmp_path / today / "no_ts.json").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -296,8 +324,9 @@ def test_generate_alerts_single_expert(tmp_path, mock_llm):
     assert alert["department"] == "Traffic Police"
     assert len(alert["evidence"]) == 1
     assert len(alert["regulations"]) == 1
-    # File was dispatched
-    assert (tmp_path / f"{alert['alert_id']}.json").exists()
+    # File was dispatched under a date subdir
+    alert_date = alert["timestamp"][:10]
+    assert (tmp_path / alert_date / f"{alert['alert_id']}.json").exists()
 
 
 def test_generate_alerts_multi_expert(tmp_path, mock_llm):
@@ -401,9 +430,10 @@ def test_end_to_end_single_expert_fixture(tmp_path, alert_fixtures, mock_llm):
     assert len(alert["regulations"]) == 1
     assert alert["regulations"][0]["regulation_code"] == "RTA Section 120(3)"
 
-    # Dispatch files exist
-    assert (tmp_path / f"{alert['alert_id']}.json").exists()
-    assert (tmp_path / "dispatch_log.jsonl").exists()
+    # Dispatch files exist (under date subdir)
+    alert_date = alert["timestamp"][:10]
+    assert (tmp_path / alert_date / f"{alert['alert_id']}.json").exists()
+    assert (tmp_path / alert_date / "dispatch_log.jsonl").exists()
 
 
 def test_end_to_end_multi_expert_fixture(tmp_path, alert_fixtures, mock_llm):
@@ -421,9 +451,10 @@ def test_end_to_end_multi_expert_fixture(tmp_path, alert_fixtures, mock_llm):
     assert "Emergency Management Center" in departments
     assert "Municipal & Meteorological Duty Office" in departments
 
-    # Two alert files + one dispatch log
+    # Two alert files + one dispatch log (under shared date subdir)
     import json
-    log_file = tmp_path / "dispatch_log.jsonl"
+    alert_date = alerts[0]["timestamp"][:10]
+    log_file = tmp_path / alert_date / "dispatch_log.jsonl"
     lines = [l for l in log_file.read_text().strip().split("\n") if l]
     assert len(lines) == 2
 
@@ -439,7 +470,8 @@ def test_end_to_end_empty_findings_fixture(tmp_path, alert_fixtures, mock_llm):
         output_dir=tmp_path,
     )
     assert alerts == []
-    assert not (tmp_path / "dispatch_log.jsonl").exists()
+    # No date subdirs created either (nothing dispatched)
+    assert list(tmp_path.rglob("dispatch_log.jsonl")) == []
 
 
 # =============================================================================
