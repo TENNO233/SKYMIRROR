@@ -1,29 +1,10 @@
 """
-alert_manager.py — Alert Generation & Dispatch Agent
-======================================================
-Responsibility: Consume the aggregated `expert_results` and produce a
-structured list of alerts stored in `state["alerts"]`.  Optionally dispatch
-alerts to external systems (webhook, message queue, monitoring platform).
-
-Implementation notes (TODO)
----------------------------
-- Input:  `state["expert_results"]`  (merged dict from all active experts)
-- Output: `state["alerts"]`          (list of alert dicts)
-- Alert schema (suggested):
-    {
-        "severity":      "low" | "medium" | "high" | "critical",
-        "type":          "traffic_violation" | "safety_incident" | "env_hazard",
-        "message":       str,
-        "source_expert": str,
-        "timestamp":     ISO-8601 str,
-        "image_path":    str,
-    }
-- Dispatch options: HTTP webhook (httpx), Kafka topic, SNS, or a DB write.
-- Idempotency: use `image_path` + expert name as a deduplication key.
+alert_manager.py - Minimal alert synthesis for expert results.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import logging
 from typing import Any
 
@@ -31,18 +12,15 @@ from skymirror.graph.state import SkymirrorState
 
 logger = logging.getLogger(__name__)
 
+_EXPERT_TO_TYPE = {
+    "order_expert": "traffic_violation",
+    "safety_expert": "safety_incident",
+    "environment_expert": "env_hazard",
+}
+
 
 def alert_manager_node(state: SkymirrorState) -> dict[str, Any]:
-    """
-    LangGraph node function for the Alert Manager.
-
-    Args:
-        state: Fully or partially populated pipeline state.
-               `state["expert_results"]` contains all expert findings.
-
-    Returns:
-        Partial state dict with `alerts` list populated.
-    """
+    """Convert expert results into structured alerts."""
     expert_results: dict[str, Any] = state.get("expert_results", {})
     logger.info(
         "alert_manager: Processing results from %d expert(s): %s",
@@ -50,27 +28,43 @@ def alert_manager_node(state: SkymirrorState) -> dict[str, Any]:
         list(expert_results.keys()),
     )
 
-    # TODO: Implement alert synthesis and dispatch.
-    # Example skeleton:
-    #
-    # import datetime, httpx, os
-    # alerts = []
-    # for expert_name, findings in expert_results.items():
-    #     for finding in findings.get("findings", []):
-    #         alert = {
-    #             "severity": findings.get("severity", "low"),
-    #             "type": _EXPERT_TO_TYPE[expert_name],
-    #             "message": finding,
-    #             "source_expert": expert_name,
-    #             "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-    #             "image_path": state.get("image_path", ""),
-    #         }
-    #         alerts.append(alert)
-    #
-    # webhook_url = os.getenv("ALERT_WEBHOOK_URL")
-    # if webhook_url and alerts:
-    #     httpx.post(webhook_url, json=alerts, timeout=5.0)
-    #
-    # return {"alerts": alerts}
+    alerts: list[dict[str, Any]] = []
+    timestamp = datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    image_path = state.get("image_path", "")
 
-    raise NotImplementedError("alert_manager_node is not yet implemented.")
+    for expert_name, result in expert_results.items():
+        findings = result.get("findings") or []
+        severity = str(result.get("severity", "low"))
+        alert_type = _EXPERT_TO_TYPE.get(expert_name, "unknown")
+
+        if findings:
+            for finding in findings:
+                alerts.append(
+                    {
+                        "severity": severity,
+                        "type": alert_type,
+                        "message": str(finding),
+                        "source_expert": expert_name,
+                        "timestamp": timestamp,
+                        "image_path": image_path,
+                    }
+                )
+            continue
+
+        if int(result.get("retrieved_context_count", 0)) == 0:
+            continue
+
+        summary = str(result.get("summary", "")).strip()
+        if summary:
+            alerts.append(
+                {
+                    "severity": severity,
+                    "type": alert_type,
+                    "message": summary,
+                    "source_expert": expert_name,
+                    "timestamp": timestamp,
+                    "image_path": image_path,
+                }
+            )
+
+    return {"alerts": alerts}

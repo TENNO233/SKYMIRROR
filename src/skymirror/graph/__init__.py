@@ -7,6 +7,13 @@ Public surface:
 """
 
 from skymirror.graph.state import SkymirrorState
-from skymirror.graph.graph import app
 
 __all__ = ["app", "SkymirrorState"]
+
+
+def __getattr__(name: str):
+    if name == "app":
+        from skymirror.graph.graph import app
+
+        return app
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -113,7 +113,8 @@ def _run_pipeline(image_path: str, app: Any) -> None:
     initial_state = {
         "image_path": image_path,
         # Remaining fields start empty; each node populates its own slice
-        "vlm_text": "",
+        "guardrail_result": {},
+        "vlm_outputs": {},
         "validated_text": "",
         "active_experts": [],
         "expert_results": {},
@@ -126,6 +127,15 @@ def _run_pipeline(image_path: str, app: Any) -> None:
     except Exception as exc:
         # Pipeline errors must NOT crash the daemon — log and continue
         logger.error("Pipeline raised an unhandled exception: %s", exc, exc_info=True)
+        return
+
+    guardrail_result: dict[str, Any] = final_state.get("guardrail_result", {})
+    if guardrail_result and not guardrail_result.get("allowed", False):
+        logger.info(
+            "Pipeline complete - frame blocked by guardrail (%s): %s",
+            guardrail_result.get("status", "blocked"),
+            guardrail_result.get("reason", "no reason provided"),
+        )
         return
 
     alerts: list[dict] = final_state.get("alerts", [])
