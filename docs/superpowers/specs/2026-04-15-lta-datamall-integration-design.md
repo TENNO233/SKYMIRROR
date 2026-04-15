@@ -97,11 +97,11 @@ Added to `constants.py`:
 LTA_DOMAIN_MAP = {
     "traffic": ["TrafficIncidents", "FaultyTrafficLights"],
     "safety": ["TrafficIncidents"],
-    "environment": ["PUB_Flood", "RoadWorks"],
+    "environment": ["PubFloodAlerts", "RoadWorks"],
 }
 
 # All endpoints to query (superset)
-LTA_ALL_ENDPOINTS = ["TrafficIncidents", "FaultyTrafficLights", "RoadWorks", "PUB_Flood"]
+LTA_ALL_ENDPOINTS = ["TrafficIncidents", "FaultyTrafficLights", "RoadWorks", "PubFloodAlerts"]
 ```
 
 All LTA endpoints are queried regardless of domain. Events from endpoints listed in the domain's `LTA_DOMAIN_MAP` entry are tagged `location_and_domain`; events from other endpoints are tagged `location_only`. This implements the two-layer matching (option C) agreed during design.
@@ -114,12 +114,12 @@ Uses the same `api.data.gov.sg/v1/transport/traffic-images` API the team already
 
 - API key read from `LTA_API_KEY` environment variable
 - Auth header: `{"AccountKey": LTA_API_KEY}`
-- Base URL: `http://datamall2.mytransport.sg/ltaodataservice/`
-- Queried endpoints:
+- Base URL: `https://datamall2.mytransport.sg/ltaodataservice/` (HTTPS required — HTTP returns 404)
+- Queried endpoints (verified against live API 2026-04-15):
   - `TrafficIncidents` — accidents, vehicle breakdowns, road blocks, diversions
   - `FaultyTrafficLights` — faulty or under-maintenance traffic lights
   - `RoadWorks` — approved road construction/maintenance
-  - `PUB_Flood` — flood alerts from PUB (Public Utilities Board)
+  - `PubFloodAlerts` — flood alerts from PUB (Public Utilities Board)
 
 ### Graceful Degradation
 
@@ -128,7 +128,7 @@ All three failure modes return `LtaCorroboration(api_available=False, matches=[]
 - LTA API request fails (timeout, 4xx, 5xx)
 - data.gov.sg camera resolution fails (camera_id not found)
 
-No exceptions propagated. Warning logged via `structlog`.
+No exceptions propagated. Warning logged via stdlib `logging` (consistent with other `tools/alert/` modules).
 
 ### Geo Distance Calculation
 
@@ -235,14 +235,14 @@ def render_alert(
 LTA_DOMAIN_MAP: dict[str, list[str]] = {
     "traffic": ["TrafficIncidents", "FaultyTrafficLights"],
     "safety": ["TrafficIncidents"],
-    "environment": ["PUB_Flood", "RoadWorks"],
+    "environment": ["PubFloodAlerts", "RoadWorks"],
 }
 
 # All endpoints to query (superset of all domain-specific endpoints)
-LTA_ALL_ENDPOINTS: list[str] = ["TrafficIncidents", "FaultyTrafficLights", "RoadWorks", "PUB_Flood"]
+LTA_ALL_ENDPOINTS: list[str] = ["TrafficIncidents", "FaultyTrafficLights", "RoadWorks", "PubFloodAlerts"]
 
 # LTA DataMall base URL
-LTA_BASE_URL = "http://datamall2.mytransport.sg/ltaodataservice/"
+LTA_BASE_URL = "https://datamall2.mytransport.sg/ltaodataservice/"
 
 # data.gov.sg camera API
 CAMERA_API_URL = "https://api.data.gov.sg/v1/transport/traffic-images"

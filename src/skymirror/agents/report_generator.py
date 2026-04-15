@@ -145,7 +145,8 @@ def _render_full_report(
     )
 
     cases = select_representative_cases(triggered, n=3)
-    featured_ids = {c["decision_id"] for c in cases}
+    # Use .get() — some records may lack decision_id; filter out None to keep set consistent
+    featured_ids = {c.get("decision_id") for c in cases if c.get("decision_id")}
     case_md = "\n".join(render_case(c, index=i + 1) for i, c in enumerate(cases))
 
     jsonl_rel = f"data/oa_log/{target_date.isoformat()}.jsonl"

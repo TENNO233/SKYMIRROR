@@ -414,6 +414,36 @@ def test_generate_report_empty_day_produces_self_diagnostic(tmp_path, mock_llm):
     assert "Verification checklist" in text
 
 
+def test_generate_report_case_c_has_self_diagnostic_and_profile(
+    tmp_path, mock_llm, fixtures_dir: Path
+):
+    """Case C: records exist but 0 triggers — must render BOTH self-diagnostic
+    framing (for operator) AND system profile section (so maintainer can see
+    what OA actually did)."""
+    from skymirror.agents.report_generator import generate_report
+
+    # Stage: copy the fixture into a fake oa_log dir where generate_report expects it
+    oa_log_dir = tmp_path / "oa_log"
+    oa_log_dir.mkdir()
+    src = (fixtures_dir / "no_trigger_day.jsonl").read_text()
+    (oa_log_dir / "2026-04-12.jsonl").write_text(src)
+
+    output_dir = tmp_path / "reports"
+    report_path = generate_report(
+        target_date=date(2026, 4, 12),
+        oa_log_dir=oa_log_dir,
+        output_dir=output_dir,
+    )
+    text = report_path.read_text()
+
+    # Case C self-diagnostic framing
+    assert "NOT necessarily normal" in text
+    assert "stale keyword vocabulary" in text or "incident-free" in text
+    # System profile still appears so maintainer can see routing/expert activity
+    assert "System Behaviour Profile" in text
+    assert "Expert activations" in text
+
+
 def test_generate_daily_report_legacy_wrapper_exists():
     """main.py's APScheduler imports `generate_daily_report` — must remain callable."""
     from skymirror.agents.report_generator import generate_daily_report
