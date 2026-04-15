@@ -611,7 +611,7 @@ class TestLookupLtaEvents:
             elif "RoadWorks" in url:
                 mock_resp.json.return_value = sample["road_works"]
             elif "Flood" in url:
-                mock_resp.json.return_value = sample["pub_flood"]
+                mock_resp.json.return_value = sample["pub_flood_alerts"]
             else:
                 mock_resp.json.return_value = {"value": []}
             return mock_resp

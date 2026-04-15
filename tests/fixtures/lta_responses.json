@@ -70,8 +70,8 @@
       }
     ]
   },
-  "pub_flood": {
-    "odata.metadata": "http://datamall2.mytransport.sg/ltaodataservice/$metadata#FloodAlertSet",
+  "pub_flood_alerts": {
+    "odata.metadata": "https://datamall2.mytransport.sg/ltaodataservice/$metadata#FloodAlertSet",
     "value": []
   }
 }

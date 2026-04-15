@@ -52,7 +52,7 @@ DEPARTMENT_MAP: dict[str, str] = {
 LTA_DOMAIN_MAP: dict[str, list[str]] = {
     "traffic": ["TrafficIncidents", "FaultyTrafficLights"],
     "safety": ["TrafficIncidents"],
-    "environment": ["PUB_Flood", "RoadWorks"],
+    "environment": ["PubFloodAlerts", "RoadWorks"],
 }
 
 # All LTA endpoints to query (superset)
@@ -60,11 +60,11 @@ LTA_ALL_ENDPOINTS: list[str] = [
     "TrafficIncidents",
     "FaultyTrafficLights",
     "RoadWorks",
-    "PUB_Flood",
+    "PubFloodAlerts",
 ]
 
 # LTA DataMall base URL
-LTA_BASE_URL = "http://datamall2.mytransport.sg/ltaodataservice/"
+LTA_BASE_URL = "https://datamall2.mytransport.sg/ltaodataservice/"
 
 # data.gov.sg camera API (no auth needed)
 CAMERA_API_URL = "https://api.data.gov.sg/v1/transport/traffic-images"
