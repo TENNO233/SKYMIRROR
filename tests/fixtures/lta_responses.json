@@ -1,0 +1,79 @@
+{
+  "camera_api": {
+    "items": [
+      {
+        "timestamp": "2026-04-15T08:30:00+08:00",
+        "cameras": [
+          {
+            "camera_id": "4798",
+            "latitude": 1.29531,
+            "longitude": 103.871,
+            "image": "https://images.data.gov.sg/api/traffic-images/2026/04/cam4798.jpg"
+          },
+          {
+            "camera_id": "1701",
+            "latitude": 1.44565,
+            "longitude": 103.77055,
+            "image": "https://images.data.gov.sg/api/traffic-images/2026/04/cam1701.jpg"
+          }
+        ]
+      }
+    ]
+  },
+  "traffic_incidents": {
+    "odata.metadata": "http://datamall2.mytransport.sg/ltaodataservice/$metadata#IncidentSet",
+    "value": [
+      {
+        "Type": "Accident",
+        "Latitude": 1.29550,
+        "Longitude": 103.87120,
+        "Message": "(15/4)08:25 Accident on Ayer Rajah Expressway (AYE) towards Tuas after Clementi Ave 6 Exit."
+      },
+      {
+        "Type": "Vehicle Breakdown",
+        "Latitude": 1.44600,
+        "Longitude": 103.77100,
+        "Message": "(15/4)07:50 Vehicle breakdown on BKE towards Woodlands after Dairy Farm Exit."
+      },
+      {
+        "Type": "Road Block",
+        "Latitude": 1.35000,
+        "Longitude": 103.90000,
+        "Message": "(15/4)09:00 Road block on Geylang Road."
+      }
+    ]
+  },
+  "faulty_traffic_lights": {
+    "odata.metadata": "http://datamall2.mytransport.sg/ltaodataservice/$metadata#FaultyTrafficLightSet",
+    "value": [
+      {
+        "AlarmID": "FTL-2026-0415-001",
+        "NodeID": "N1234",
+        "Type": "Amber Fault",
+        "StartDate": "2026-04-15 07:00:00",
+        "EndDate": "",
+        "Message": "Faulty traffic light at junction of Ayer Rajah Expressway / Clementi Ave 6.",
+        "Latitude": 1.29500,
+        "Longitude": 103.87080
+      }
+    ]
+  },
+  "road_works": {
+    "odata.metadata": "http://datamall2.mytransport.sg/ltaodataservice/$metadata#RoadWorkSet",
+    "value": [
+      {
+        "EventID": "RW-2026-0089",
+        "StartDate": "2026-04-10 22:00:00",
+        "EndDate": "2026-04-20 05:00:00",
+        "SvcDept": "LTA",
+        "Message": "Road works on Clementi Road between Clementi Ave 2 and West Coast Road.",
+        "Latitude": 1.29800,
+        "Longitude": 103.87300
+      }
+    ]
+  },
+  "pub_flood": {
+    "odata.metadata": "http://datamall2.mytransport.sg/ltaodataservice/$metadata#FloodAlertSet",
+    "value": []
+  }
+}
