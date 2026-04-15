@@ -51,3 +51,23 @@ def mock_llm(monkeypatch):
         "skymirror.tools.llm_factory.get_llm",
         lambda **kwargs: _FakeLLM(),
     )
+
+
+@pytest.fixture(autouse=True)
+def _block_network_by_default(monkeypatch, request):
+    """Block accidental network calls in tests.
+
+    Tests that need httpx should mock it explicitly using `patch(...)`.
+    """
+    # Tests that explicitly patch httpx should not be affected
+    from unittest.mock import MagicMock
+
+    def _raise_blocked(*args, **kwargs):
+        raise Exception("Network blocked in tests — mock httpx explicitly if needed")
+
+    # Patch httpx.get in lta_lookup to raise; tests using patch() will override this
+    import skymirror.tools.alert.lta_lookup as lta_mod
+    original_httpx = lta_mod.httpx
+    fake_httpx = MagicMock()
+    fake_httpx.get = MagicMock(side_effect=_raise_blocked)
+    monkeypatch.setattr(lta_mod, "httpx", fake_httpx)

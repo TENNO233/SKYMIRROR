@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -38,9 +39,18 @@ from typing import Any
 from skymirror.tools.alert.classification import classify
 from skymirror.tools.alert.constants import DOMAIN_MAP
 from skymirror.tools.alert.dispatcher import dispatch
+from skymirror.tools.alert.lta_lookup import lookup_lta_events
 from skymirror.tools.alert.rendering import render_alert
 
 logger = logging.getLogger(__name__)
+
+_CAMERA_ID_RE = re.compile(r"cam(\d+)")
+
+
+def _extract_camera_id(image_path: str) -> str | None:
+    """Extract camera ID from image path, e.g. 'cam4798_...' -> '4798'."""
+    m = _CAMERA_ID_RE.search(image_path)
+    return m.group(1) if m else None
 
 
 def generate_alerts(
@@ -95,16 +105,21 @@ def generate_alerts(
             expert_severity=expert_severity,
         )
 
-        # Tool 2: Render
+        # Tool 2: LTA corroboration (independent official data)
+        camera_id = _extract_camera_id(image_path)
+        corroboration = lookup_lta_events(camera_id, domain) if camera_id else None
+
+        # Tool 3: Render
         alert = render_alert(
             expert_name=expert_name,
             classification=classification,
             findings=findings,
             regulations=rag_citations,
             image_path=image_path,
+            corroboration=corroboration,
         )
 
-        # Tool 3: Dispatch
+        # Tool 4: Dispatch
         dispatch(alert, output_dir=output_dir)
 
         alerts.append(alert)

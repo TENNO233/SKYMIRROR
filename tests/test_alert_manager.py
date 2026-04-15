@@ -729,3 +729,85 @@ class TestRenderAlertCorroboration:
             "timestamp", "image_path",
         ]:
             assert key in alert
+
+
+from skymirror.agents.alert_manager import _extract_camera_id, generate_alerts
+
+
+class TestExtractCameraId:
+    """Tests for _extract_camera_id helper."""
+
+    def test_standard_format(self):
+        assert _extract_camera_id("data/frames/cam4798_20260412T083000.jpg") == "4798"
+
+    def test_just_filename(self):
+        assert _extract_camera_id("cam1701_20260412.jpg") == "1701"
+
+    def test_no_match_returns_none(self):
+        assert _extract_camera_id("random_image.jpg") is None
+
+    def test_empty_string_returns_none(self):
+        assert _extract_camera_id("") is None
+
+
+class TestAlertManagerLtaIntegration:
+    """Tests for LTA lookup integration in generate_alerts."""
+
+    def test_alert_includes_corroboration(self, mock_llm, tmp_path, fixtures_dir):
+        """When LTA lookup succeeds, alert dict has lta_corroboration."""
+        fixture_data = json.loads((fixtures_dir / "alert_expert_results.json").read_text())
+        scenario = fixture_data["single_expert"]
+        lta_sample = json.loads((fixtures_dir / "lta_responses.json").read_text())
+
+        def mock_get(url, **kwargs):
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.raise_for_status = MagicMock()
+            if "data.gov.sg" in url:
+                mock_resp.json.return_value = lta_sample["camera_api"]
+            elif "TrafficIncidents" in url:
+                mock_resp.json.return_value = lta_sample["traffic_incidents"]
+            elif "FaultyTrafficLights" in url:
+                mock_resp.json.return_value = lta_sample["faulty_traffic_lights"]
+            elif "RoadWorks" in url:
+                mock_resp.json.return_value = lta_sample["road_works"]
+            else:
+                mock_resp.json.return_value = {"value": []}
+            return mock_resp
+
+        with patch("skymirror.tools.alert.lta_lookup.httpx") as mock_httpx:
+            mock_httpx.get.side_effect = mock_get
+            with patch.dict(os.environ, {"LTA_API_KEY": "test-key"}):
+                alerts = generate_alerts(
+                    expert_results=scenario["expert_results"],
+                    image_path=scenario["image_path"],
+                    rag_citations=scenario.get("rag_citations", []),
+                    output_dir=tmp_path,
+                )
+
+        assert len(alerts) == 1
+        assert "lta_corroboration" in alerts[0]
+
+    def test_alert_without_lta_key(self, mock_llm, tmp_path, fixtures_dir):
+        """When LTA_API_KEY is missing, alert still generated with null corroboration."""
+        fixture_data = json.loads((fixtures_dir / "alert_expert_results.json").read_text())
+        scenario = fixture_data["single_expert"]
+
+        with patch("skymirror.tools.alert.lta_lookup.httpx") as mock_httpx:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {"items": [{"cameras": []}]}
+            mock_httpx.get.return_value = mock_resp
+
+            with patch.dict(os.environ, {}, clear=True):
+                os.environ.pop("LTA_API_KEY", None)
+                alerts = generate_alerts(
+                    expert_results=scenario["expert_results"],
+                    image_path=scenario["image_path"],
+                    rag_citations=scenario.get("rag_citations", []),
+                    output_dir=tmp_path,
+                )
+
+        assert len(alerts) == 1
+        assert alerts[0]["lta_corroboration"] is None
