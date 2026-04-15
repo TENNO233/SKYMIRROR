@@ -136,3 +136,100 @@ def match_events(
 
     matches.sort(key=lambda m: m.distance_m)
     return matches
+
+
+# ---------------------------------------------------------------------------
+# LTA DataMall API fetching
+# ---------------------------------------------------------------------------
+
+def _parse_lta_events(data: dict[str, Any], source_api: str) -> list[LtaEvent]:
+    """Parse LTA DataMall JSON response into LtaEvent list."""
+    events: list[LtaEvent] = []
+    for item in data.get("value", []):
+        try:
+            events.append(LtaEvent(
+                event_type=item.get("Type", item.get("AlarmID", source_api)),
+                description=item.get("Message", ""),
+                latitude=float(item["Latitude"]),
+                longitude=float(item["Longitude"]),
+                source_api=source_api,
+            ))
+        except (KeyError, ValueError) as exc:
+            logger.debug("Skipping malformed LTA event: %s", exc)
+    return events
+
+
+def fetch_lta_events(endpoint: str) -> list[LtaEvent]:
+    """Fetch events from a single LTA DataMall endpoint.
+
+    Returns empty list if API key is missing or request fails.
+    """
+    api_key = os.environ.get("LTA_API_KEY")
+    if not api_key:
+        logger.warning("LTA_API_KEY not set; skipping %s.", endpoint)
+        return []
+
+    try:
+        url = f"{LTA_BASE_URL}{endpoint}"
+        resp = httpx.get(url, headers={"AccountKey": api_key}, timeout=10.0)
+        resp.raise_for_status()
+        return _parse_lta_events(resp.json(), source_api=endpoint)
+    except Exception as exc:
+        logger.warning("LTA fetch failed for %s: %s", endpoint, exc)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Main lookup function
+# ---------------------------------------------------------------------------
+
+def _unavailable(camera_id: str) -> LtaCorroboration:
+    """Return a corroboration result indicating API was unavailable."""
+    return LtaCorroboration(
+        camera_id=camera_id,
+        camera_lat=0.0,
+        camera_lng=0.0,
+        matches=[],
+        queried_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        api_available=False,
+    )
+
+
+def lookup_lta_events(
+    camera_id: str,
+    domain: str,
+    radius_m: float = 500.0,
+) -> LtaCorroboration:
+    """Query LTA DataMall for official events near a camera.
+
+    Orchestrates: camera resolution -> fetch all endpoints -> match events.
+    Returns LtaCorroboration with api_available=False on any failure.
+    """
+    # Step 1: Resolve camera location
+    location = resolve_camera_location(camera_id)
+    if location is None:
+        return _unavailable(camera_id)
+
+    cam_lat, cam_lng = location
+
+    # Step 2: Check API key before fetching
+    if not os.environ.get("LTA_API_KEY"):
+        logger.warning("LTA_API_KEY not set; returning unavailable.")
+        return _unavailable(camera_id)
+
+    # Step 3: Fetch events from all endpoints
+    all_events: list[LtaEvent] = []
+    for endpoint in LTA_ALL_ENDPOINTS:
+        all_events.extend(fetch_lta_events(endpoint))
+
+    # Step 4: Match events by distance and domain
+    matches = match_events(cam_lat, cam_lng, radius_m, domain, all_events)
+
+    return LtaCorroboration(
+        camera_id=camera_id,
+        camera_lat=cam_lat,
+        camera_lng=cam_lng,
+        matches=matches,
+        queried_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        api_available=True,
+    )

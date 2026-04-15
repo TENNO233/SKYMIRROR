@@ -551,3 +551,111 @@ class TestMatchEvents:
         matches = match_events(1.29531, 103.871, 500.0, "traffic", events)
         assert len(matches) == 2
         assert matches[0].distance_m <= matches[1].distance_m
+
+
+from skymirror.tools.alert.lta_lookup import fetch_lta_events, lookup_lta_events
+
+
+class TestFetchLtaEvents:
+    """Tests for fetching events from LTA DataMall endpoints."""
+
+    def test_parses_traffic_incidents(self, fixtures_dir):
+        sample = json.loads((fixtures_dir / "lta_responses.json").read_text())
+        with patch("skymirror.tools.alert.lta_lookup.httpx") as mock_httpx:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = sample["traffic_incidents"]
+            mock_resp.raise_for_status = MagicMock()
+            mock_httpx.get.return_value = mock_resp
+
+            with patch.dict(os.environ, {"LTA_API_KEY": "test-key"}):
+                events = fetch_lta_events("TrafficIncidents")
+
+        assert len(events) == 3
+        assert events[0].event_type == "Accident"
+        assert events[0].source_api == "TrafficIncidents"
+        assert isinstance(events[0].latitude, float)
+
+    def test_missing_api_key_returns_empty(self):
+        with patch.dict(os.environ, {}, clear=True):
+            # Ensure LTA_API_KEY is not set
+            os.environ.pop("LTA_API_KEY", None)
+            events = fetch_lta_events("TrafficIncidents")
+
+        assert events == []
+
+    def test_api_failure_returns_empty(self):
+        with patch("skymirror.tools.alert.lta_lookup.httpx") as mock_httpx:
+            mock_httpx.get.side_effect = Exception("503 Service Unavailable")
+            with patch.dict(os.environ, {"LTA_API_KEY": "test-key"}):
+                events = fetch_lta_events("TrafficIncidents")
+
+        assert events == []
+
+
+class TestLookupLtaEvents:
+    """Tests for the main lookup_lta_events orchestrator."""
+
+    def test_full_lookup_with_matches(self, fixtures_dir):
+        sample = json.loads((fixtures_dir / "lta_responses.json").read_text())
+
+        def mock_get(url, **kwargs):
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.raise_for_status = MagicMock()
+            if "data.gov.sg" in url:
+                mock_resp.json.return_value = sample["camera_api"]
+            elif "TrafficIncidents" in url:
+                mock_resp.json.return_value = sample["traffic_incidents"]
+            elif "FaultyTrafficLights" in url:
+                mock_resp.json.return_value = sample["faulty_traffic_lights"]
+            elif "RoadWorks" in url:
+                mock_resp.json.return_value = sample["road_works"]
+            elif "Flood" in url:
+                mock_resp.json.return_value = sample["pub_flood"]
+            else:
+                mock_resp.json.return_value = {"value": []}
+            return mock_resp
+
+        with patch("skymirror.tools.alert.lta_lookup.httpx") as mock_httpx:
+            mock_httpx.get.side_effect = mock_get
+            with patch.dict(os.environ, {"LTA_API_KEY": "test-key"}):
+                result = lookup_lta_events("4798", "traffic", radius_m=500.0)
+
+        assert result.api_available is True
+        assert result.camera_id == "4798"
+        assert abs(result.camera_lat - 1.29531) < 1e-5
+        assert len(result.matches) > 0
+        # Accident near cam4798 should be location_and_domain for traffic
+        domain_matches = [m for m in result.matches if m.match_type == "location_and_domain"]
+        assert len(domain_matches) >= 1
+
+    def test_missing_api_key_graceful(self):
+        with patch("skymirror.tools.alert.lta_lookup.httpx") as mock_httpx:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {"items": [{"cameras": []}]}
+            mock_httpx.get.return_value = mock_resp
+
+            with patch.dict(os.environ, {}, clear=True):
+                os.environ.pop("LTA_API_KEY", None)
+                result = lookup_lta_events("4798", "traffic")
+
+        assert result.api_available is False
+        assert result.matches == []
+
+    def test_camera_not_found_graceful(self, fixtures_dir):
+        sample = json.loads((fixtures_dir / "lta_responses.json").read_text())
+        with patch("skymirror.tools.alert.lta_lookup.httpx") as mock_httpx:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = sample["camera_api"]
+            mock_resp.raise_for_status = MagicMock()
+            mock_httpx.get.return_value = mock_resp
+
+            with patch.dict(os.environ, {"LTA_API_KEY": "test-key"}):
+                result = lookup_lta_events("9999", "traffic")
+
+        assert result.api_available is False
+        assert result.matches == []
