@@ -494,3 +494,60 @@ class TestResolveCamera:
             result = resolve_camera_location("4798")
 
         assert result is None
+
+
+# =============================================================================
+# Task 3: Haversine Distance and Event Matching
+# =============================================================================
+
+from skymirror.tools.alert.lta_lookup import _haversine_m, match_events
+
+
+class TestHaversine:
+    """Tests for haversine distance calculation."""
+
+    def test_same_point_is_zero(self):
+        assert _haversine_m(1.3, 103.8, 1.3, 103.8) == 0.0
+
+    def test_known_distance(self):
+        # NUS (1.2966, 103.7764) to Changi Airport (1.3644, 103.9915): ~25 km
+        dist = _haversine_m(1.2966, 103.7764, 1.3644, 103.9915)
+        assert 24000 < dist < 26000
+
+
+class TestMatchEvents:
+    """Tests for geo + domain matching logic."""
+
+    def test_within_radius_and_domain(self):
+        events = [
+            LtaEvent("Accident", "Crash on AYE", 1.29550, 103.87120, "TrafficIncidents"),
+        ]
+        matches = match_events(1.29531, 103.871, 500.0, "traffic", events)
+        assert len(matches) == 1
+        assert matches[0].match_type == "location_and_domain"
+        assert matches[0].distance_m < 500.0
+
+    def test_within_radius_but_different_domain(self):
+        events = [
+            LtaEvent("Accident", "Crash on AYE", 1.29550, 103.87120, "TrafficIncidents"),
+        ]
+        matches = match_events(1.29531, 103.871, 500.0, "environment", events)
+        assert len(matches) == 1
+        assert matches[0].match_type == "location_only"
+
+    def test_beyond_radius_filtered_out(self):
+        events = [
+            LtaEvent("Road Block", "Block on Geylang", 1.35000, 103.90000, "TrafficIncidents"),
+        ]
+        # cam4798 is at ~1.295, 103.871 — Geylang is ~7km away
+        matches = match_events(1.29531, 103.871, 500.0, "traffic", events)
+        assert len(matches) == 0
+
+    def test_mixed_results_sorted_by_distance(self):
+        events = [
+            LtaEvent("Accident", "Far", 1.29600, 103.87200, "TrafficIncidents"),
+            LtaEvent("Amber Fault", "Near", 1.29535, 103.87105, "FaultyTrafficLights"),
+        ]
+        matches = match_events(1.29531, 103.871, 500.0, "traffic", events)
+        assert len(matches) == 2
+        assert matches[0].distance_m <= matches[1].distance_m

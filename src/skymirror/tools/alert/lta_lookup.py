@@ -85,3 +85,54 @@ def resolve_camera_location(camera_id: str) -> tuple[float, float] | None:
     except Exception as exc:
         logger.warning("Camera resolution failed for %s: %s", camera_id, exc)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Geo distance
+# ---------------------------------------------------------------------------
+
+_EARTH_RADIUS_M = 6_371_000.0
+
+
+def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Haversine distance in metres between two (lat, lng) points."""
+    rlat1, rlng1 = math.radians(lat1), math.radians(lng1)
+    rlat2, rlng2 = math.radians(lat2), math.radians(lng2)
+    dlat = rlat2 - rlat1
+    dlng = rlng2 - rlng1
+    a = math.sin(dlat / 2) ** 2 + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlng / 2) ** 2
+    return 2 * _EARTH_RADIUS_M * math.asin(math.sqrt(a))
+
+
+# ---------------------------------------------------------------------------
+# Event matching
+# ---------------------------------------------------------------------------
+
+def match_events(
+    cam_lat: float,
+    cam_lng: float,
+    radius_m: float,
+    domain: str,
+    events: list[LtaEvent],
+) -> list[LtaMatch]:
+    """Match LTA events within radius, tagging by domain relevance.
+
+    Events from endpoints in LTA_DOMAIN_MAP[domain] get "location_and_domain";
+    all other events within radius get "location_only".
+    Returns matches sorted by distance (nearest first).
+    """
+    domain_endpoints = set(LTA_DOMAIN_MAP.get(domain, []))
+    matches: list[LtaMatch] = []
+
+    for event in events:
+        dist = _haversine_m(cam_lat, cam_lng, event.latitude, event.longitude)
+        if dist <= radius_m:
+            match_type = (
+                "location_and_domain"
+                if event.source_api in domain_endpoints
+                else "location_only"
+            )
+            matches.append(LtaMatch(event=event, distance_m=round(dist, 1), match_type=match_type))
+
+    matches.sort(key=lambda m: m.distance_m)
+    return matches
