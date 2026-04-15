@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from skymirror.tools.alert.constants import DEPARTMENT_MAP, DOMAIN_MAP
+
+if TYPE_CHECKING:
+    from skymirror.tools.alert.lta_lookup import LtaCorroboration
 
 
 def _deterministic_id(image_path: str, expert_name: str) -> str:
@@ -29,6 +32,7 @@ def render_alert(
     findings: list[dict[str, Any]],
     regulations: list[dict[str, Any]],
     image_path: str,
+    corroboration: "LtaCorroboration | None" = None,
 ) -> dict[str, Any]:
     """Assemble a complete alert dict from classification + expert data.
 
@@ -39,6 +43,33 @@ def render_alert(
     department = DEPARTMENT_MAP.get(domain, "General Operations")
 
     evidence = [f.get("description", "") for f in findings if f.get("description")]
+
+    lta_corroboration = None
+    if corroboration is not None and corroboration.api_available:
+        lta_corroboration = {
+            "camera_location": {"lat": corroboration.camera_lat, "lng": corroboration.camera_lng},
+            "queried_at": corroboration.queried_at,
+            "api_available": True,
+            "matches": [
+                {
+                    "event_type": m.event.event_type,
+                    "description": m.event.description,
+                    "distance_m": m.distance_m,
+                    "match_type": m.match_type,
+                    "source_api": m.event.source_api,
+                }
+                for m in corroboration.matches
+            ],
+            "match_summary": {
+                "total": len(corroboration.matches),
+                "location_and_domain": sum(
+                    1 for m in corroboration.matches if m.match_type == "location_and_domain"
+                ),
+                "location_only": sum(
+                    1 for m in corroboration.matches if m.match_type == "location_only"
+                ),
+            },
+        }
 
     return {
         "alert_id": _deterministic_id(image_path, expert_name),
@@ -52,4 +83,5 @@ def render_alert(
         "department": department,
         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "image_path": image_path,
+        "lta_corroboration": lta_corroboration,
     }

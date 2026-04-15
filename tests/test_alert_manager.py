@@ -659,3 +659,73 @@ class TestLookupLtaEvents:
 
         assert result.api_available is False
         assert result.matches == []
+
+
+# =============================================================================
+# Task 5: Rendering Changes — lta_corroboration field in render_alert
+# =============================================================================
+
+from skymirror.tools.alert.rendering import render_alert
+from skymirror.tools.alert.lta_lookup import LtaCorroboration, LtaMatch, LtaEvent
+
+
+class TestRenderAlertCorroboration:
+    """Tests for lta_corroboration field in rendered alert dict."""
+
+    def _base_args(self):
+        return dict(
+            expert_name="order_expert",
+            classification={"sub_type": "red_light", "severity": "high", "message": "Test alert"},
+            findings=[{"description": "Running red light", "confidence": 0.87}],
+            regulations=[],
+            image_path="data/frames/cam4798_20260412T083000.jpg",
+        )
+
+    def test_corroboration_none_gives_null_field(self):
+        alert = render_alert(**self._base_args(), corroboration=None)
+        assert alert["lta_corroboration"] is None
+
+    def test_corroboration_unavailable_gives_null_field(self):
+        corr = LtaCorroboration(
+            camera_id="4798", camera_lat=0.0, camera_lng=0.0,
+            matches=[], queried_at="2026-04-15T08:30:00Z", api_available=False,
+        )
+        alert = render_alert(**self._base_args(), corroboration=corr)
+        assert alert["lta_corroboration"] is None
+
+    def test_corroboration_with_matches(self):
+        event = LtaEvent("Accident", "Crash on AYE", 1.295, 103.871, "TrafficIncidents")
+        match = LtaMatch(event=event, distance_m=23.5, match_type="location_and_domain")
+        corr = LtaCorroboration(
+            camera_id="4798", camera_lat=1.29531, camera_lng=103.871,
+            matches=[match], queried_at="2026-04-15T08:30:00Z", api_available=True,
+        )
+        alert = render_alert(**self._base_args(), corroboration=corr)
+
+        lta = alert["lta_corroboration"]
+        assert lta is not None
+        assert lta["camera_location"] == {"lat": 1.29531, "lng": 103.871}
+        assert lta["api_available"] is True
+        assert len(lta["matches"]) == 1
+        assert lta["matches"][0]["event_type"] == "Accident"
+        assert lta["matches"][0]["match_type"] == "location_and_domain"
+        assert lta["match_summary"]["total"] == 1
+        assert lta["match_summary"]["location_and_domain"] == 1
+        assert lta["match_summary"]["location_only"] == 0
+
+    def test_existing_fields_unchanged_with_corroboration(self):
+        event = LtaEvent("Accident", "Crash", 1.295, 103.871, "TrafficIncidents")
+        match = LtaMatch(event=event, distance_m=50.0, match_type="location_and_domain")
+        corr = LtaCorroboration(
+            camera_id="4798", camera_lat=1.29531, camera_lng=103.871,
+            matches=[match], queried_at="2026-04-15T08:30:00Z", api_available=True,
+        )
+        alert = render_alert(**self._base_args(), corroboration=corr)
+
+        # All 11 original fields still present
+        for key in [
+            "alert_id", "domain", "sub_type", "severity", "message",
+            "source_expert", "evidence", "regulations", "department",
+            "timestamp", "image_path",
+        ]:
+            assert key in alert
