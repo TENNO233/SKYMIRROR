@@ -77,7 +77,9 @@ def resolve_camera_location(camera_id: str) -> tuple[float, float] | None:
         cameras = data.get("items", [{}])[0].get("cameras", [])
         for cam in cameras:
             if str(cam.get("camera_id")) == str(camera_id):
-                return (cam["latitude"], cam["longitude"])
+                # data.gov.sg nests coordinates under "location"
+                loc = cam.get("location", {})
+                return (loc["latitude"], loc["longitude"])
 
         logger.warning("Camera %s not found in data.gov.sg response.", camera_id)
         return None

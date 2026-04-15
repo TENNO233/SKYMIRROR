@@ -6,14 +6,12 @@
         "cameras": [
           {
             "camera_id": "4798",
-            "latitude": 1.29531,
-            "longitude": 103.871,
+            "location": {"latitude": 1.29531, "longitude": 103.871},
             "image": "https://images.data.gov.sg/api/traffic-images/2026/04/cam4798.jpg"
           },
           {
             "camera_id": "1701",
-            "latitude": 1.44565,
-            "longitude": 103.77055,
+            "location": {"latitude": 1.44565, "longitude": 103.77055},
             "image": "https://images.data.gov.sg/api/traffic-images/2026/04/cam1701.jpg"
           }
         ]
