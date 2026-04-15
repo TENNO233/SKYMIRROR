@@ -55,6 +55,14 @@ def render_case(case: dict[str, Any], index: int) -> str:
     etype = alert.get("emergency_type", "unknown")
     vlm = case.get("vlm_output_excerpt", "(no VLM excerpt)")
 
+    # Routing trace — why these experts were activated (XAI: process transparency)
+    trace = case.get("routing_trace") or {}
+    matched_kw = trace.get("matched_keywords") or []
+    activated = trace.get("activated_experts") or []
+    kw_str = ", ".join(f"`{k}`" for k in matched_kw) if matched_kw else "_(none)_"
+    ex_str = ", ".join(activated) if activated else "_(fallback routing)_"
+    routing_line = f"Keywords matched: {kw_str} → Activated: {ex_str}"
+
     # Collect expert finding summaries + citation block
     ef_lines: list[str] = []
     for expert_name, payload in (case.get("expert_findings") or {}).items():
@@ -87,6 +95,9 @@ def render_case(case: dict[str, Any], index: int) -> str:
         "",
         f"**📸 Scene** (VLM)",
         f"> {vlm}",
+        "",
+        f"**🧭 Routing Trace** (why these experts were called)",
+        routing_line,
         "",
         f"**📚 Expert Finding & Legal Citation** (Expert + RAG)",
         *ef_lines,

@@ -274,6 +274,40 @@ def test_render_case_section_has_three_layers(fixtures_dir: Path):
     assert "ambulance" in md
 
 
+def test_render_case_includes_routing_trace(fixtures_dir: Path):
+    """XAI: every case must show why experts were activated (matched keywords)."""
+    from skymirror.tools.daily_report.loader import load_oa_log
+    from skymirror.tools.daily_report.rendering import render_case
+    records = load_oa_log(fixtures_dir, date(2026, 4, 12), filename_stem_override="normal_day")
+    case = records[1]  # the critical collision — has routing_trace
+    md = render_case(case, index=1)
+
+    # Header present
+    assert "Routing Trace" in md
+    # Matched keywords from the fixture
+    assert "collision" in md
+    assert "overturned" in md
+    assert "debris" in md
+    # Activated experts from the fixture
+    assert "safety_expert" in md
+    assert "environment_expert" in md
+
+
+def test_render_case_handles_missing_routing_trace():
+    """Case without routing_trace should not crash and should show fallback notation."""
+    from skymirror.tools.daily_report.rendering import render_case
+    case = {
+        "timestamp": "2026-04-12T00:00:00Z",
+        "vlm_output_excerpt": "scene",
+        "expert_findings": {},
+        "alert": {"severity": "low", "emergency_type": "other"},
+        # no routing_trace key
+    }
+    md = render_case(case, index=1)
+    assert "Routing Trace" in md
+    assert "fallback routing" in md or "(none)" in md
+
+
 # ---------------------------------------------------------------------------
 # Task 13: Remaining template renderers
 # ---------------------------------------------------------------------------
