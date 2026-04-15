@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -630,12 +629,13 @@ class TestLookupLtaEvents:
         domain_matches = [m for m in result.matches if m.match_type == "location_and_domain"]
         assert len(domain_matches) >= 1
 
-    def test_missing_api_key_graceful(self):
+    def test_missing_api_key_graceful(self, fixtures_dir):
+        sample = json.loads((fixtures_dir / "lta_responses.json").read_text())
         with patch("skymirror.tools.alert.lta_lookup.httpx") as mock_httpx:
             mock_resp = MagicMock()
             mock_resp.status_code = 200
             mock_resp.raise_for_status = MagicMock()
-            mock_resp.json.return_value = {"items": [{"cameras": []}]}
+            mock_resp.json.return_value = sample["camera_api"]
             mock_httpx.get.return_value = mock_resp
 
             with patch.dict(os.environ, {}, clear=True):

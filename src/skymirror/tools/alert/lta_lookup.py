@@ -212,7 +212,7 @@ def lookup_lta_events(
 
     cam_lat, cam_lng = location
 
-    # Step 2: Check API key before fetching
+    # Step 2: Check API key before fetching (fail-fast to avoid the endpoint loop)
     if not os.environ.get("LTA_API_KEY"):
         logger.warning("LTA_API_KEY not set; returning unavailable.")
         return _unavailable(camera_id)
