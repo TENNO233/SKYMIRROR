@@ -56,6 +56,11 @@ data/logs/*
 data/reports/*
 !data/reports/.gitkeep
 
+# LangGraph Studio / local graph artifacts
+.langgraph_api/
+data/langgraph/
+data/graph/
+
 # Local vector DB (Chroma, FAISS, etc.) — never commit index files
 data/local_vector_db/*
 !data/local_vector_db/.gitkeep
@@ -79,3 +84,10 @@ Desktop.ini
 .idea/
 *.swp
 *.swo
+
+# Daily Explication Report runtime outputs
+data/oa_log/
+data/reports/
+
+# Local virtualenv
+.venv/

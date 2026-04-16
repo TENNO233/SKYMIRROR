@@ -22,15 +22,15 @@ def test_validator_agent_node_reconciles_outputs(
         validator,
         "_load_validator_config",
         lambda: validator.ValidatorConfig(
-            api_key="gemini-key",
-            model="gemini-3.1-pro-preview",
+            api_key="openai-key",
+            model="gpt-5.4-mini",
             max_tokens=64,
             temperature=0.0,
         ),
     )
     monkeypatch.setattr(
         validator,
-        "_invoke_gemini_validator",
+        "_invoke_openai_validator",
         lambda *_: "Two cars are stopped at a junction with clear lane markings.",
     )
 
@@ -47,5 +47,5 @@ def test_validator_agent_node_reconciles_outputs(
     assert result["validated_text"] == (
         "Two cars are stopped at a junction with clear lane markings."
     )
-    assert result["metadata"]["validator"]["provider"] == "gemini"
+    assert result["metadata"]["validator"]["provider"] == "openai"
     assert result["metadata"]["validator"]["input_sources"] == ["gemini", "qwen"]

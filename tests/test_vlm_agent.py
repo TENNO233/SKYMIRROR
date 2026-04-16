@@ -12,13 +12,24 @@ from skymirror.graph.state import _merge_dicts
 def test_load_gemini_config_uses_new_env_surface(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
     monkeypatch.delenv("GEMINI_VLM_MODEL", raising=False)
-    monkeypatch.delenv("GEMINI_GUARDRAIL_MODEL", raising=False)
 
     config = vlm_agent._load_gemini_config()
 
     assert config.api_key == "gemini-key"
-    assert config.vlm_model == "gemini-3.1-pro-preview"
-    assert config.guardrail_model == "gemini-3.1-pro-preview"
+    assert config.vlm_model == "gemini-3-flash-preview"
+
+
+def test_load_guardrail_config_uses_openai_env_surface(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+    monkeypatch.delenv("OPENAI_GUARDRAIL_MODEL", raising=False)
+    monkeypatch.delenv("OPENAI_AGENT_MODEL", raising=False)
+
+    config = vlm_agent._load_guardrail_config()
+
+    assert config.api_key == "openai-key"
+    assert config.model == "gpt-5.4-mini"
+    assert config.max_tokens == 256
+    assert config.temperature == 0.0
 
 
 def test_load_qwen_config_uses_singapore_default_base_url(
@@ -44,11 +55,10 @@ def test_image_guardrail_allows_valid_image(
 
     monkeypatch.setattr(
         vlm_agent,
-        "_load_gemini_config",
-        lambda: vlm_agent.GeminiConfig(
-            api_key="gemini-key",
-            vlm_model="gemini-3.1-pro-preview",
-            guardrail_model="gemini-3.1-pro-preview",
+        "_load_guardrail_config",
+        lambda: vlm_agent.OpenAIGuardrailConfig(
+            api_key="openai-key",
+            model="gpt-5.4-mini",
             max_tokens=64,
             temperature=0.0,
         ),
@@ -68,6 +78,7 @@ def test_image_guardrail_allows_valid_image(
 
     assert result["guardrail_result"]["allowed"] is True
     assert result["guardrail_result"]["status"] == "allowed"
+    assert result["metadata"]["guardrail"]["provider"] == "openai"
     assert result["metadata"]["guardrail"]["width"] == 320
     assert result["metadata"]["guardrail"]["height"] == 240
 
@@ -92,18 +103,17 @@ def test_image_guardrail_blocks_on_guardrail_exception(
 
     monkeypatch.setattr(
         vlm_agent,
-        "_load_gemini_config",
-        lambda: vlm_agent.GeminiConfig(
-            api_key="gemini-key",
-            vlm_model="gemini-3.1-pro-preview",
-            guardrail_model="gemini-3.1-pro-preview",
+        "_load_guardrail_config",
+        lambda: vlm_agent.OpenAIGuardrailConfig(
+            api_key="openai-key",
+            model="gpt-5.4-mini",
             max_tokens=64,
             temperature=0.0,
         ),
     )
 
     def _raise(*_: object) -> vlm_agent.GuardrailAssessment:
-        raise RuntimeError("Gemini unavailable")
+        raise RuntimeError("OpenAI unavailable")
 
     monkeypatch.setattr(vlm_agent, "_classify_image_safety", _raise)
 
@@ -111,7 +121,7 @@ def test_image_guardrail_blocks_on_guardrail_exception(
 
     assert result["guardrail_result"]["allowed"] is False
     assert result["guardrail_result"]["categories"] == ["guardrail_error"]
-    assert "Gemini unavailable" in result["guardrail_result"]["reason"]
+    assert "OpenAI unavailable" in result["guardrail_result"]["reason"]
 
 
 def test_dual_vlm_nodes_write_separate_outputs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,8 +141,7 @@ def test_dual_vlm_nodes_write_separate_outputs(monkeypatch: pytest.MonkeyPatch) 
         "_load_gemini_config",
         lambda: vlm_agent.GeminiConfig(
             api_key="gemini-key",
-            vlm_model="gemini-3.1-pro-preview",
-            guardrail_model="gemini-3.1-pro-preview",
+            vlm_model="gemini-3-flash-preview",
             max_tokens=64,
             temperature=0.0,
         ),

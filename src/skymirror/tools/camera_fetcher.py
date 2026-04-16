@@ -48,9 +48,10 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import requests
+from langsmith import traceable
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,15 @@ _DEFAULT_MAX_AGE_HOURS: int = 24
 
 #: Filename suffix for the always-current copy (no timestamp)
 _LATEST_SUFFIX: str = "latest"
+
+
+def _trace_fetch_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "camera_id": str(inputs.get("camera_id", "")),
+        "save_dir": str(inputs.get("save_dir", "")),
+        "keep_history": bool(inputs.get("keep_history", True)),
+        "max_age_hours": int(inputs.get("max_age_hours", _DEFAULT_MAX_AGE_HOURS)),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +145,11 @@ def purge_old_frames(save_dir: Path, camera_id: str, max_age_hours: int = _DEFAU
     return deleted
 
 
+@traceable(
+    name="fetch_latest_frame",
+    run_type="tool",
+    process_inputs=_trace_fetch_inputs,
+)
 def fetch_latest_frame(
     camera_id: str,
     save_dir: Path,
