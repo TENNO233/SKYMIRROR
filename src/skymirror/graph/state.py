@@ -2,20 +2,18 @@
 state.py — Global State Definition for SKYMIRROR
 =================================================
 `SkymirrorState` is the single source of truth passed between every node in
-the LangGraph pipeline.  LangGraph merges partial dicts returned by each node
+the LangGraph pipeline. LangGraph merges partial dicts returned by each node
 into this shared state object.
 
 Reducer annotations on mutable fields (`expert_results`, `alerts`) allow safe
 parallel fan-out to multiple expert nodes: each expert writes its own key/items
-and LangGraph merges the results before handing control to the alert_manager.
+and LangGraph merges the results before handing control to the alert manager.
 """
 
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Any, Optional
-
-from typing_extensions import TypedDict
+from typing import Annotated, Any, Literal, Optional, TypedDict
 
 
 # ---------------------------------------------------------------------------
@@ -24,21 +22,77 @@ from typing_extensions import TypedDict
 
 def _merge_dicts(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     """
-    Reducer for `expert_results`.
-
-    When multiple experts run in parallel (via LangGraph's Send API), each
-    expert returns a partial dict like `{"order_expert": {...findings...}}`.
-    This reducer merges those partial dicts into one unified mapping without
-    clobbering existing keys.
+    Merge partial dictionaries returned by parallel LangGraph branches.
 
     Args:
-        a: Accumulated expert results so far.
-        b: New partial expert results from the current node.
+        a: Accumulated results so far.
+        b: New partial results from the current node.
 
     Returns:
-        Merged dict combining all expert outputs.
+        A merged mapping containing both dictionaries.
     """
     return {**a, **b}
+
+
+# ---------------------------------------------------------------------------
+# Shared Schemas
+# ---------------------------------------------------------------------------
+
+SeverityLevel = Literal["low", "medium", "high", "critical"]
+ConfidenceLevel = Literal["low", "medium", "high"]
+ImpactScope = Literal["local", "single_lane", "multi_lane", "intersection"]
+PersistenceLevel = Literal["new", "persistent", "worsening", "unknown"]
+
+
+class ValidatedSignals(TypedDict, total=False):
+    """Lightweight structured hints extracted by the validator."""
+
+    vehicle_count: int
+    stopped_vehicle_count: int
+    pedestrian_present: bool
+    blocked_lanes: int
+    queueing: bool
+    water_present: bool
+    construction_present: bool
+    obstacle_present: bool
+    low_visibility: bool
+    lighting_abnormal: bool
+    wrong_way_cue: bool
+    collision_cue: bool
+    dangerous_crossing_cue: bool
+    conflict_risk_cue: bool
+
+
+class ExpertScenario(TypedDict):
+    """One scenario detected by an expert agent."""
+
+    name: str
+    severity: SeverityLevel
+    confidence: ConfidenceLevel
+    reason: str
+    evidence: list[str]
+    impact_scope: ImpactScope
+    persistence: PersistenceLevel
+    recommended_actions: list[str]
+
+
+class ExpertResult(TypedDict):
+    """Structured output emitted by one expert agent."""
+
+    matched: bool
+    category: str
+    summary: str
+    urgent: bool
+    scenarios: list[ExpertScenario]
+
+
+class HistoryFrame(TypedDict, total=False):
+    """Snapshot of a previous frame used for short-term temporal reasoning."""
+
+    image_path: str
+    validated_text: str
+    validated_signals: ValidatedSignals
+    expert_results: dict[str, ExpertResult]
 
 
 # ---------------------------------------------------------------------------
@@ -51,43 +105,34 @@ class SkymirrorState(TypedDict, total=False):
 
     Fields
     ------
-    image_path : str
+    image_path:
         Absolute path (or URI) of the traffic camera frame being processed.
-        Set once at entry; read-only for all downstream nodes.
 
-    vlm_text : str
+    vlm_text:
         Raw textual description produced by the VLM agent from the image.
-        May contain noise, hallucinations, or formatting artefacts that the
-        validator_agent is responsible for cleaning up.
 
-    validated_text : str
-        Refined, structured description produced by the validator_agent.
-        This is the canonical text used by the orchestrator for routing and
-        by expert agents for analysis.
+    validated_text:
+        Refined, normalized description used by downstream routing and experts.
 
-    active_experts : list[str]
-        List of expert node names that the orchestrator has selected for this
-        frame (e.g. `["order_expert", "safety_expert"]`).
-        Populated by `route_to_experts` in edges.py.
+    validated_signals:
+        Lightweight structured cues extracted from `validated_text`.
 
-    expert_results : dict[str, Any]
-        Aggregated findings from all activated expert agents.
-        Schema per key:  `{ "<expert_name>": { "findings": [...], ... } }`
+    history_context:
+        Short-term in-memory history for the same camera. Used by experts to
+        infer persistence and simple temporal patterns such as repeated queueing.
 
-        Annotated with `_merge_dicts` so that parallel expert nodes can each
-        write their own key without race conditions.
+    active_experts:
+        List of expert node names selected by the orchestrator.
 
-    alerts : list[dict[str, Any]]
-        Structured alert objects generated by the alert_manager.
-        Schema per item: `{ "severity": str, "type": str, "message": str,
-                             "timestamp": str, "source_expert": str }`
+    expert_results:
+        Aggregated findings from activated expert agents. Each expert writes
+        under its own key and the reducer merges them safely.
 
-        Annotated with `operator.add` (list concatenation) so that the
-        alert_manager can append items without overwriting earlier ones.
+    alerts:
+        Structured alert objects generated by the alert manager.
 
-    metadata : dict[str, Any]  (optional)
-        Arbitrary key-value bag for runtime diagnostics, tracing IDs, camera
-        location info, etc.  Not processed by any agent — purely observational.
+    metadata:
+        Optional runtime diagnostics bag.
     """
 
     # --- Ingestion -----------------------------------------------------------
@@ -98,12 +143,14 @@ class SkymirrorState(TypedDict, total=False):
 
     # --- Validation ----------------------------------------------------------
     validated_text: str
+    validated_signals: ValidatedSignals
+    history_context: list[HistoryFrame]
 
     # --- Orchestration -------------------------------------------------------
     active_experts: list[str]
 
     # --- Expert Analysis (parallel-safe via reducers) ------------------------
-    expert_results: Annotated[dict[str, Any], _merge_dicts]
+    expert_results: Annotated[dict[str, ExpertResult], _merge_dicts]
     alerts: Annotated[list[dict[str, Any]], operator.add]
 
     # --- Diagnostics (optional) ----------------------------------------------
