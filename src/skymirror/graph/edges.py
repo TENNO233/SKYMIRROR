@@ -114,8 +114,8 @@ _GUARDRAIL_BLOCKED_NODE = "end_pipeline"
 _ORCHESTRATOR_FINISH_NODE = "finish"
 
 
-def route_after_guardrail(state: SkymirrorState) -> Union[list[Send], str]:
-    """Route safe frames to both VLMs, and fail closed otherwise."""
+def route_after_guardrail(state: SkymirrorState) -> str:
+    """Route safe frames to the single VLM stage, and fail closed otherwise."""
     guardrail_result = state.get("guardrail_result", {})
     allowed = bool(guardrail_result.get("allowed", False))
 
@@ -127,11 +127,8 @@ def route_after_guardrail(state: SkymirrorState) -> Union[list[Send], str]:
         )
         return _GUARDRAIL_BLOCKED_NODE
 
-    logger.info("route_after_guardrail: Guardrail passed; fan-out to Gemini and Qwen.")
-    return [
-        Send("gemini_vlm", state),
-        Send("qwen_vlm", state),
-    ]
+    logger.info("route_after_guardrail: Guardrail passed; routing to VLM.")
+    return "vlm_agent"
 
 
 def _signal_activates_expert(expert_node: str, signals: dict[str, object]) -> bool:

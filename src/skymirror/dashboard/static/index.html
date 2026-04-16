@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SKYMIRROR Operations Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <p class="eyebrow">SKYMIRROR / GOVERNMENT OPERATIONS CONSOLE</p>
+          <h1>Traffic Monitor Dashboard</h1>
+          <p class="lead">
+            Live monitor surface for camera oversight, event triage, and report review.
+          </p>
+        </div>
+        <div class="topbar-actions">
+          <div id="refreshStamp" class="refresh-stamp">Waiting for dashboard telemetry</div>
+          <button
+            id="reportsToggle"
+            class="icon-button"
+            type="button"
+            aria-label="Open daily report history"
+            title="Daily report history"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M6.5 4.5h8l3 3v12h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Zm7 1.4v2.6h2.6M8 11h8M8 14h8M8 17h5"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.6"
+              />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section id="dashboardView" class="view view-active" aria-label="Live monitor dashboard">
+          <div id="monitors" class="monitor-grid"></div>
+        </section>
+
+        <section
+          id="reportsView"
+          class="view view-hidden reports-view"
+          aria-label="Daily report history"
+          hidden
+        >
+          <div class="reports-shell">
+            <header class="reports-header">
+              <div>
+                <p class="eyebrow">ARCHIVE / DAILY REPORT HISTORY</p>
+                <h2>Incident and Explanation Reports</h2>
+              </div>
+              <button
+                id="reportsClose"
+                class="icon-button"
+                type="button"
+                aria-label="Close daily report history"
+                title="Back to monitors"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M7 7l10 10M17 7 7 17"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-width="1.8"
+                  />
+                </svg>
+              </button>
+            </header>
+
+            <div class="reports-layout">
+              <aside id="reportsList" class="reports-list" aria-label="Report list"></aside>
+              <article id="reportDetail" class="report-detail" aria-live="polite"></article>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="monitorTemplate">
+      <article class="monitor-card">
+        <header class="monitor-header">
+          <div>
+            <p class="monitor-label"></p>
+            <h2 class="monitor-title"></h2>
+          </div>
+          <div class="monitor-header-meta">
+            <span class="status-chip"></span>
+            <span class="monitor-timestamp"></span>
+          </div>
+        </header>
+
+        <div class="monitor-layout">
+          <section class="monitor-image-panel">
+            <div class="image-frame">
+              <img class="camera-frame" alt="" />
+              <div class="image-placeholder" hidden>
+                <p class="placeholder-title">Feed unavailable</p>
+                <span class="placeholder-detail">No local frame or live image could be resolved.</span>
+              </div>
+              <div class="image-overlay">
+                <div>
+                  <span class="overlay-kicker">Source</span>
+                  <strong class="image-source"></strong>
+                </div>
+                <div>
+                  <span class="overlay-kicker">Latest frame</span>
+                  <strong class="frame-timestamp"></strong>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="status-panel">
+            <div class="status-summary">
+              <div class="status-summary-header">
+                <div>
+                  <p class="panel-kicker">Status board</p>
+                  <h3 class="incident-line"></h3>
+                </div>
+                <button class="camera-toggle-button" type="button">
+                  Switch camera
+                </button>
+              </div>
+              <p class="status-detail"></p>
+            </div>
+
+            <dl class="status-grid">
+              <div class="status-cell">
+                <dt>Road type</dt>
+                <dd class="road-type"></dd>
+              </div>
+              <div class="status-cell">
+                <dt>Dispatch</dt>
+                <dd class="dispatch-state"></dd>
+              </div>
+              <div class="status-cell">
+                <dt>Analysis</dt>
+                <dd class="analysis-time"></dd>
+              </div>
+              <div class="status-cell">
+                <dt>Alert type</dt>
+                <dd class="alert-type"></dd>
+              </div>
+            </dl>
+
+            <div class="status-copy">
+              <p class="copy-title">Latest analytic summary</p>
+              <p class="summary-text"></p>
+            </div>
+
+            <div class="signal-strip"></div>
+            <div class="expert-strip"></div>
+          </section>
+
+          <aside class="camera-list-panel" hidden>
+            <div class="camera-list-header">
+              <p class="panel-kicker">Camera selector</p>
+              <span class="camera-count"></span>
+            </div>
+            <div class="camera-site">
+              <h3 class="site-name"></h3>
+              <p class="site-area"></p>
+            </div>
+            <div class="camera-list"></div>
+          </aside>
+        </div>
+      </article>
+    </template>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

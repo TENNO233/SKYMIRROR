@@ -10,12 +10,11 @@ Studio should show both workflow families on one canvas:
       | frame
       +--> image_guardrail --(blocked)--> END
       |       | (allowed)
-      |       +--> gemini_vlm --+
-      |       +--> qwen_vlm ----+--> validator_agent --> orchestrator_agent
-      |                                                   | dispatch / evaluate
-      |                                                   v
-      |                                       order_expert / safety_expert /
-      |                                       environment_expert / alert_manager / END
+      |       +--> vlm_agent --> validator_agent --> orchestrator_agent
+      |                                             | dispatch / evaluate
+      |                                             v
+      |                                 order_expert / safety_expert /
+      |                                 environment_expert / alert_manager / END
       |
       | report
       +--> report_generator --> END
@@ -42,11 +41,7 @@ from skymirror.agents.experts import (
 )
 from skymirror.agents.orchestrator import orchestrator_node
 from skymirror.agents.validator import validator_agent_node
-from skymirror.agents.vlm_agent import (
-    gemini_vlm_node,
-    image_guardrail_node,
-    qwen_vlm_node,
-)
+from skymirror.agents.vlm_agent import image_guardrail_node, vlm_agent_node
 from skymirror.agents.report_generator import generate_report
 from skymirror.graph.edges import route_after_guardrail, route_from_orchestrator
 from skymirror.graph.state import SkymirrorState
@@ -132,13 +127,11 @@ def _build_graph() -> StateGraph:
         "image_guardrail",
         image_guardrail_node,
         destinations={
-            "gemini_vlm": "allowed",
-            "qwen_vlm": "allowed",
+            "vlm_agent": "allowed",
             END: "blocked",
         },
     )
-    graph.add_node("gemini_vlm", gemini_vlm_node)
-    graph.add_node("qwen_vlm", qwen_vlm_node)
+    graph.add_node("vlm_agent", vlm_agent_node)
     graph.add_node("validator_agent", validator_agent_node)
     graph.add_node(
         "orchestrator_agent",
@@ -171,11 +164,10 @@ def _build_graph() -> StateGraph:
     graph.add_conditional_edges(
         source="image_guardrail",
         path=route_after_guardrail,
-        path_map={"end_pipeline": END},
+        path_map={"vlm_agent": "vlm_agent", "end_pipeline": END},
     )
 
-    graph.add_edge("gemini_vlm", "validator_agent")
-    graph.add_edge("qwen_vlm", "validator_agent")
+    graph.add_edge("vlm_agent", "validator_agent")
     graph.add_edge("validator_agent", "orchestrator_agent")
 
     graph.add_conditional_edges(

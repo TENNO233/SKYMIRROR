@@ -1,0 +1,582 @@
+:root {
+  color-scheme: dark;
+  --bg: #040d16;
+  --panel: rgba(8, 27, 40, 0.88);
+  --panel-strong: rgba(12, 36, 53, 0.96);
+  --line: rgba(125, 181, 204, 0.18);
+  --line-strong: rgba(140, 204, 201, 0.36);
+  --text: #edf7ff;
+  --muted: #89a8bc;
+  --accent: #67d3c5;
+  --accent-bright: #a5e867;
+  --warn: #ffbf69;
+  --danger: #ff7567;
+  --shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+  --radius-xl: 28px;
+  --radius-lg: 20px;
+  --radius-md: 14px;
+  --font-sans: "Bahnschrift", "Segoe UI Variable", "Aptos", "Segoe UI", sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", "SFMono-Regular", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  background:
+    radial-gradient(circle at 20% 15%, rgba(103, 211, 197, 0.12), transparent 32%),
+    radial-gradient(circle at 85% 12%, rgba(165, 232, 103, 0.08), transparent 22%),
+    linear-gradient(180deg, #071421 0%, #040d16 100%);
+  color: var(--text);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(109, 176, 196, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(109, 176, 196, 0.05) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: linear-gradient(180deg, rgba(255, 255, 255, 0.7), transparent 92%);
+  pointer-events: none;
+}
+
+button {
+  font: inherit;
+}
+
+.app-shell {
+  position: relative;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.topbar,
+.reports-header,
+.monitor-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.topbar {
+  margin-bottom: 24px;
+}
+
+.eyebrow,
+.monitor-label,
+.overlay-kicker,
+.panel-kicker,
+.copy-title {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.monitor-label,
+.overlay-kicker,
+.panel-kicker,
+.copy-title {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.brand-block h1,
+.reports-header h2 {
+  margin: 0;
+  font-size: clamp(2rem, 3vw, 3.2rem);
+  line-height: 0.96;
+}
+
+.lead {
+  margin: 12px 0 0;
+  max-width: 720px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.refresh-stamp,
+.status-chip,
+.signal-pill,
+.expert-pill,
+.report-meta-pill {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.refresh-stamp {
+  min-width: 220px;
+  padding: 12px 14px;
+  color: var(--muted);
+  font-size: 0.92rem;
+  text-align: center;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(10, 36, 51, 0.95), rgba(7, 24, 35, 0.92));
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.icon-button:hover,
+.camera-button:hover,
+.report-button:hover {
+  transform: translateY(-2px);
+}
+
+.icon-button svg {
+  width: 22px;
+  height: 22px;
+}
+
+.workspace {
+  position: relative;
+  min-height: calc(100vh - 140px);
+}
+
+.view {
+  transition: opacity 260ms ease, transform 260ms ease, visibility 260ms ease;
+}
+
+.view-hidden {
+  opacity: 0;
+  transform: translateY(12px);
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.monitor-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+
+.monitor-card,
+.reports-shell {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow);
+}
+
+.monitor-card {
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(11, 29, 42, 0.97), rgba(6, 18, 28, 0.95));
+  animation: monitor-enter 420ms ease both;
+}
+
+.monitor-card:nth-child(2) {
+  animation-delay: 80ms;
+}
+
+.monitor-title {
+  margin: 0;
+  font-size: 1.3rem;
+  line-height: 1.2;
+}
+
+.monitor-header-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.monitor-timestamp {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.status-chip,
+.signal-pill,
+.expert-pill,
+.report-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+}
+
+.status-chip {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.status-chip::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 12px currentColor;
+}
+
+.status-chip.is-monitoring {
+  color: var(--accent);
+}
+
+.status-chip.is-alerting {
+  color: var(--warn);
+}
+
+.status-chip.is-blocked {
+  color: var(--danger);
+}
+
+.status-chip.is-offline {
+  color: #9db2bf;
+}
+
+.monitor-layout,
+.reports-layout {
+  display: grid;
+  gap: 18px;
+}
+
+.monitor-layout {
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.95fr);
+}
+
+.reports-layout {
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.55fr);
+  min-height: calc(100% - 112px);
+}
+
+.image-frame,
+.status-panel,
+.camera-list-panel,
+.reports-list,
+.report-detail {
+  height: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(12, 38, 56, 0.82), rgba(8, 23, 33, 0.88));
+}
+
+.status-panel,
+.camera-list-panel,
+.reports-list,
+.report-detail {
+  padding: 18px;
+}
+
+.image-frame {
+  position: relative;
+  min-height: 340px;
+  overflow: hidden;
+}
+
+.camera-frame {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #06121c;
+}
+
+.image-placeholder,
+.report-detail-empty,
+.empty-state {
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.image-placeholder {
+  position: absolute;
+  inset: 0;
+  gap: 10px;
+  padding: 24px;
+  background: linear-gradient(180deg, rgba(7, 22, 33, 0.95), rgba(5, 16, 24, 0.98));
+}
+
+.image-placeholder p,
+.incident-line,
+.site-name {
+  margin: 0;
+  font-weight: 700;
+}
+
+.image-placeholder span,
+.status-detail,
+.site-area,
+.camera-button span,
+.report-button span,
+.summary-text {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.image-overlay {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  left: 14px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(6, 14, 21, 0.3), rgba(6, 14, 21, 0.84));
+  backdrop-filter: blur(10px);
+}
+
+.status-summary-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.camera-toggle-button {
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(165, 232, 103, 0.26);
+  border-radius: 999px;
+  background: rgba(165, 232, 103, 0.08);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.camera-toggle-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(165, 232, 103, 0.48);
+  background: rgba(165, 232, 103, 0.14);
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.status-cell,
+.status-copy,
+.camera-button,
+.report-button {
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.status-cell {
+  padding: 12px;
+}
+
+.status-cell dt {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.status-cell dd {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.status-copy,
+.empty-state {
+  padding: 14px;
+}
+
+.signal-strip,
+.expert-strip,
+.report-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.signal-pill.is-positive {
+  border-color: rgba(165, 232, 103, 0.26);
+  color: #dafaa1;
+}
+
+.camera-list,
+.reports-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.camera-list-panel {
+  grid-column: 1 / -1;
+}
+
+.camera-button,
+.report-button {
+  width: 100%;
+  padding: 12px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.camera-button strong,
+.report-button strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.camera-button.is-selected,
+.report-button.is-selected {
+  border-color: rgba(165, 232, 103, 0.46);
+  background: linear-gradient(180deg, rgba(21, 60, 71, 0.82), rgba(13, 34, 40, 0.92));
+}
+
+.reports-view {
+  position: absolute;
+  inset: 0;
+}
+
+.reports-shell {
+  height: 100%;
+  padding: 22px;
+  background: linear-gradient(180deg, rgba(7, 20, 31, 0.98), rgba(4, 13, 22, 0.96));
+}
+
+.report-detail {
+  overflow: auto;
+}
+
+.report-markdown {
+  color: #d8edf8;
+  line-height: 1.7;
+}
+
+.report-markdown h1,
+.report-markdown h2,
+.report-markdown h3 {
+  margin: 1.4em 0 0.55em;
+  line-height: 1.2;
+}
+
+.report-markdown code {
+  padding: 0.16rem 0.35rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dff9af;
+  font-family: var(--font-mono);
+}
+
+.report-markdown blockquote {
+  padding: 12px 14px;
+  border-left: 3px solid rgba(103, 211, 197, 0.42);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.report-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.report-markdown th,
+.report-markdown td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: left;
+  vertical-align: top;
+}
+
+.scroll-region {
+  overflow: auto;
+  max-height: calc(100vh - 300px);
+  padding-right: 6px;
+}
+
+@keyframes monitor-enter {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 1180px) {
+  .monitor-layout,
+  .reports-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .image-frame {
+    min-height: 300px;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    padding: 16px;
+  }
+
+  .topbar,
+  .reports-header,
+  .monitor-header,
+  .status-summary-header {
+    flex-direction: column;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .refresh-stamp {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .monitor-header-meta {
+    align-items: flex-start;
+  }
+
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .image-overlay {
+    flex-direction: column;
+  }
+}

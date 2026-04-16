@@ -110,13 +110,12 @@ class SkymirrorState(TypedDict, total=False):
     target_date / oa_log_dir / output_dir / report_path:
         Inputs and outputs used by the daily report generator path.
     guardrail_result:
-        Result of the image safety gate before the VLMs are invoked.
-    vlm_outputs:
-        Parallel-safe mapping of provider name to one structured scene report.
-        Expected keys: `gemini`, `qwen`.
+        Result of the image safety gate before the VLM is invoked.
+    vlm_output:
+        Structured scene report emitted by the single VLM pass.
     validated_scene:
-        Canonical fused JSON emitted by the validator after reconciling both
-        provider scene reports.
+        Canonical JSON emitted by the validator after cross-checking the VLM
+        report against the image.
     validated_text:
         Canonical normalized text derived from `validated_scene`.
     validated_signals:
@@ -143,7 +142,7 @@ class SkymirrorState(TypedDict, total=False):
     output_dir: str
     report_path: str
     guardrail_result: dict[str, Any]
-    vlm_outputs: Annotated[dict[str, dict[str, Any]], _merge_dicts]
+    vlm_output: dict[str, Any]
     validated_scene: dict[str, Any]
     validated_text: str
     validated_signals: ValidatedSignals

@@ -80,7 +80,7 @@ def _build_dispatch_prompt(
     scene_block = (
         json.dumps(validated_scene, indent=2)
         if validated_scene
-        else "(no fused scene JSON available)"
+        else "(no validated scene JSON available)"
     )
     signals_block = (
         json.dumps(validated_signals, indent=2)
@@ -90,7 +90,7 @@ def _build_dispatch_prompt(
     return (
         "## DISPATCH MODE\n\n"
         "expert_results: (empty - no experts have run yet)\n\n"
-        "Fused validator JSON:\n"
+        "Validated scene JSON:\n"
         f"{scene_block}\n\n"
         "Validated traffic-scene description:\n"
         f"{validated_text or '(empty)'}\n\n"

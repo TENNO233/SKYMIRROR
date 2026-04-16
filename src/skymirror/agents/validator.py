@@ -1,4 +1,4 @@
-"""validator.py - OpenAI fusion node for dual-VLM structured scene reports."""
+"""validator.py - OpenAI image cross-check for a single VLM scene report."""
 
 from __future__ import annotations
 
@@ -11,18 +11,15 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from skymirror.agents.prompts import VALIDATOR_SYSTEM_PROMPT
-from skymirror.agents.scene_schema import (
-    ValidatedSceneReport,
-    VlmSceneReport,
-    coerce_model,
-)
+from skymirror.agents.scene_schema import ValidatedSceneReport, VlmSceneReport, coerce_model
+from skymirror.agents.vlm_agent import ImagePayload, build_image_payload
 from skymirror.graph.state import SkymirrorState
 from skymirror.tools.llm_factory import build_openai_chat_model, get_openai_agent_model
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_OPENAI_VALIDATOR_MODEL = "gpt-5.4-mini"
-_DEFAULT_MAX_TOKENS = 640
+_DEFAULT_OPENAI_VALIDATOR_MODEL = "gpt-5.4"
+_DEFAULT_MAX_TOKENS = 768
 _DEFAULT_TEMPERATURE = 0.0
 
 
@@ -73,26 +70,25 @@ def _load_validator_config() -> ValidatorConfig:
     )
 
 
-def _build_validator_prompt(gemini_report: VlmSceneReport, qwen_report: VlmSceneReport) -> str:
+def _build_validator_prompt(candidate_report: VlmSceneReport) -> str:
     return (
-        "Fuse these two provider scene reports into one canonical traffic-scene JSON.\n\n"
-        "Fusion rules:\n"
-        "- Keep only directly visible facts.\n"
-        "- Prefer overlap between Gemini and Qwen.\n"
-        "- If counts or hazard claims conflict, keep the more conservative supported value.\n"
+        "Review this candidate traffic-scene JSON against the image.\n\n"
+        "Validation rules:\n"
+        "- Keep only claims clearly supported by the image.\n"
+        "- If the candidate report overstates, speculates, or conflicts with the image, correct it conservatively.\n"
         "- normalized_description must be concise, factual, and suitable for downstream routing.\n"
-        "- consensus_observations should be short atomic facts.\n"
-        "- signals must align with the fused description.\n"
-        "- discarded_claims should list claims you dropped because they were unsupported, speculative, or conflicting.\n\n"
-        f"Gemini scene report:\n{json.dumps(gemini_report.model_dump(), indent=2)}\n\n"
-        f"Qwen scene report:\n{json.dumps(qwen_report.model_dump(), indent=2)}"
+        "- consensus_observations should be short atomic facts that survived cross-checking.\n"
+        "- signals must match the corrected description and stay conservative.\n"
+        "- discarded_claims should list the candidate claims you removed or softened because they were unsupported, too strong, or inaccurate.\n\n"
+        "Candidate VLM scene report:\n"
+        f"{json.dumps(candidate_report.model_dump(), indent=2)}"
     )
 
 
 def _invoke_openai_validator(
     config: ValidatorConfig,
-    gemini_report: VlmSceneReport,
-    qwen_report: VlmSceneReport,
+    image: ImagePayload,
+    candidate_report: VlmSceneReport,
 ) -> ValidatedSceneReport:
     llm = build_openai_chat_model(
         temperature=config.temperature,
@@ -104,7 +100,12 @@ def _invoke_openai_validator(
     response = structured_llm.invoke(
         [
             SystemMessage(content=VALIDATOR_SYSTEM_PROMPT),
-            HumanMessage(content=_build_validator_prompt(gemini_report, qwen_report)),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": _build_validator_prompt(candidate_report)},
+                    {"type": "image_url", "image_url": {"url": image.data_url}},
+                ]
+            ),
         ]
     )
     return coerce_model(response, ValidatedSceneReport)
@@ -119,19 +120,20 @@ def _validated_text_from_report(report: ValidatedSceneReport) -> str:
 
 
 def validator_agent_node(state: SkymirrorState) -> dict[str, Any]:
-    """Fuse Gemini and Qwen scene JSON into one canonical scene answer."""
-    vlm_outputs = state.get("vlm_outputs", {})
-    gemini_payload = vlm_outputs.get("gemini")
-    qwen_payload = vlm_outputs.get("qwen")
+    """Cross-check one VLM scene report against the frame image."""
+    image_path = state.get("image_path")
+    if not image_path:
+        raise ValueError("validator_agent_node requires state['image_path'].")
 
-    if not gemini_payload or not qwen_payload:
-        raise ValueError("validator_agent_node requires both Gemini and Qwen outputs.")
+    candidate_payload = state.get("vlm_output")
+    if not candidate_payload:
+        raise ValueError("validator_agent_node requires state['vlm_output'].")
 
-    gemini_report = coerce_model(gemini_payload, VlmSceneReport)
-    qwen_report = coerce_model(qwen_payload, VlmSceneReport)
-
+    candidate_report = coerce_model(candidate_payload, VlmSceneReport)
+    image = build_image_payload(image_path)
     config = _load_validator_config()
-    validated_scene = _invoke_openai_validator(config, gemini_report, qwen_report)
+    validated_scene = _invoke_openai_validator(config, image, candidate_report)
+
     validated_text = _validated_text_from_report(validated_scene)
     if not validated_text:
         raise RuntimeError("OpenAI validator returned an empty normalized_description.")
@@ -139,7 +141,7 @@ def validator_agent_node(state: SkymirrorState) -> dict[str, Any]:
     validated_signals = validated_scene.signals.to_state_dict()
 
     logger.info(
-        "validator_agent: Fused scene JSON with %d consensus facts.",
+        "validator_agent: Cross-checked scene JSON with %d retained observations.",
         len(validated_scene.consensus_observations),
     )
     return {
@@ -150,7 +152,9 @@ def validator_agent_node(state: SkymirrorState) -> dict[str, Any]:
             "validator": {
                 "provider": "openai",
                 "model": config.model,
-                "input_sources": ["gemini", "qwen"],
+                "review_mode": "image_cross_check",
+                "input_sources": ["vlm_output"],
+                "candidate_observation_count": len(candidate_report.direct_observations),
                 "consensus_observation_count": len(validated_scene.consensus_observations),
                 "discarded_claim_count": len(validated_scene.discarded_claims),
             }

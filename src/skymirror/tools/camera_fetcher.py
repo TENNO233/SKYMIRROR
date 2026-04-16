@@ -45,6 +45,7 @@ Usage
 from __future__ import annotations
 
 import logging
+import shutil
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -106,6 +107,11 @@ def _build_latest_filename(camera_id: str) -> str:
     return f"cam{camera_id}_{_LATEST_SUFFIX}.jpg"
 
 
+def _build_staging_filename(camera_id: str) -> str:
+    """Return the transient processing filename for a given camera."""
+    return f"cam{camera_id}_staging.jpg"
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -165,10 +171,11 @@ def fetch_latest_frame(
     1. GET the traffic-images API with a 10-second timeout.
     2. Parse the JSON and locate the camera matching `camera_id`.
     3. Download the image binary with a separate 10-second timeout.
-    4. Write the image to `save_dir` using a timestamp-based filename.
-    5. Also overwrite `cam<id>_latest.jpg` for the pipeline to use as a
-       stable reference (avoids race conditions with in-progress writes).
-    6. Purge frames older than `max_age_hours` from `save_dir`.
+    4. Write the image to `save_dir` using a timestamp-based filename
+       (or a transient staging filename when history is disabled).
+    5. Purge frames older than `max_age_hours` from `save_dir`.
+    6. Return the processing path. The caller can publish it to
+       `cam<id>_latest.jpg` once the frame has passed guardrail checks.
 
     Args:
         camera_id:    LTA camera ID (e.g. ``"4798"``).
@@ -181,7 +188,7 @@ def fetch_latest_frame(
                       ``keep_history=False``).
 
     Returns:
-        Absolute path string of the saved ``*_latest.jpg`` file on success,
+        Absolute path string of the saved processing frame on success,
         or ``None`` if the camera was not found or any network error occurred.
 
     Raises:
@@ -274,26 +281,20 @@ def fetch_latest_frame(
 
     # Timestamped copy (retained for history / debugging)
     if keep_history:
-        timestamped_path = save_dir / _build_frame_filename(camera_id, ts=now_utc)
-        try:
-            timestamped_path.write_bytes(image_bytes)
-            logger.debug("fetch_latest_frame: Saved timestamped frame — %s", timestamped_path.name)
-        except OSError as exc:
-            logger.error("fetch_latest_frame: Could not write %s — %s", timestamped_path, exc)
-            return None
+        processing_path = save_dir / _build_frame_filename(camera_id, ts=now_utc)
+    else:
+        processing_path = save_dir / _build_staging_filename(camera_id)
 
-    # Stable 'latest' copy — pipeline always reads from this path
-    latest_path = save_dir / _build_latest_filename(camera_id)
     try:
-        latest_path.write_bytes(image_bytes)
+        processing_path.write_bytes(image_bytes)
     except OSError as exc:
-        logger.error("fetch_latest_frame: Could not write latest frame %s — %s", latest_path, exc)
+        logger.error("fetch_latest_frame: Could not write frame %s — %s", processing_path, exc)
         return None
 
     logger.info(
         "fetch_latest_frame: Saved frame for camera %s -> %s (%d bytes)",
         camera_id,
-        latest_path.name,
+        processing_path.name,
         len(image_bytes),
     )
 
@@ -301,4 +302,23 @@ def fetch_latest_frame(
     if keep_history:
         purge_old_frames(save_dir, camera_id=camera_id, max_age_hours=max_age_hours)
 
+    return str(processing_path)
+
+
+def publish_latest_frame(camera_id: str, save_dir: Path, source_path: str | Path) -> Optional[str]:
+    """Promote an approved frame into the stable ``cam<id>_latest.jpg`` slot."""
+    save_dir = save_dir.resolve()
+    source = Path(source_path).expanduser().resolve()
+    latest_path = save_dir / _build_latest_filename(camera_id)
+
+    try:
+        if not source.is_file():
+            logger.warning("publish_latest_frame: Source frame missing for camera %s: %s", camera_id, source)
+            return None
+        shutil.copyfile(source, latest_path)
+    except OSError as exc:
+        logger.error("publish_latest_frame: Could not publish %s -> %s — %s", source, latest_path, exc)
+        return None
+
+    logger.debug("publish_latest_frame: Promoted approved frame for camera %s -> %s", camera_id, latest_path.name)
     return str(latest_path)

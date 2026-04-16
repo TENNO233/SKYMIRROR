@@ -18,8 +18,7 @@ dependencies = [
     "langgraph>=0.2.0",
     "langchain>=0.3.0",
     "langchain-community>=0.3.0",
-    "google-genai>=1.0.0",
-    "dashscope>=1.24.6",
+    "langchain-openai>=0.3.0",
     # --- Vector DB / RAG ------------------------------------------------------
     "pinecone>=7.0.0",
     "langchain-pinecone>=0.1.0",
@@ -51,6 +50,7 @@ dev = [
 skymirror = "skymirror.main:main"
 skymirror-rag-ingest = "skymirror.tools.rag_ingest:main"
 skymirror-rag-bootstrap-sg = "skymirror.tools.singapore_corpus:main"
+skymirror-dashboard = "skymirror.dashboard.server:main"
 
 # =============================================================================
 # Tool Configuration

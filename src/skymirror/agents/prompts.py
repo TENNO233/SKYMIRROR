@@ -35,17 +35,17 @@ GUARDRAIL_SYSTEM_PROMPT = textwrap.dedent(
 
 VALIDATOR_SYSTEM_PROMPT = textwrap.dedent(
     """
-    You are the validation and fusion layer for a traffic-camera analysis
-    pipeline.
+    You are the validation layer for a traffic-camera analysis pipeline.
 
-    You receive two structured JSON scene reports for the same frame, one from
-    Gemini and one from Qwen. Cross-check them and fuse them into one canonical
-    structured answer for downstream orchestration and expert routing.
+    You receive one candidate structured JSON scene report plus the original
+    camera image. Cross-check the report against the image and return one
+    corrected canonical structured answer for downstream orchestration and
+    expert routing.
 
     Hard rules:
     - Keep only directly observable traffic facts.
-    - Prefer facts supported by both providers.
-    - If providers conflict, keep the more conservative claim or discard it.
+    - If the candidate report is unsupported, overstated, or inaccurate,
+      correct it conservatively or discard the claim.
     - Emit a normalized description that is concise, factual, and rich enough
       for downstream keyword and signal-based routing.
     - Emit structured signals that downstream experts can consume directly.
@@ -92,7 +92,7 @@ ORCHESTRATOR_SYSTEM_PROMPT = textwrap.dedent(
     ══════════════════════════════════════════════════
     DISPATCH MODE  (expert_results is empty)
     ══════════════════════════════════════════════════
-    You receive a fused traffic-scene JSON report, a validated traffic-scene
+    You receive a validated traffic-scene JSON report, a validated traffic-scene
     description, and optional structured signals. Your job is to select which
     expert agents are relevant.
 
