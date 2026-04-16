@@ -291,7 +291,7 @@ def fetch_latest_frame(
         return None
 
     logger.info(
-        "fetch_latest_frame: Saved frame for camera %s → %s (%d bytes)",
+        "fetch_latest_frame: Saved frame for camera %s -> %s (%d bytes)",
         camera_id,
         latest_path.name,
         len(image_bytes),

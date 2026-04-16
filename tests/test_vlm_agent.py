@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from skymirror.agents.scene_schema import TrafficSceneSignals, VlmSceneReport
 from skymirror.agents import vlm_agent
 from skymirror.graph.state import _merge_dicts
 
@@ -155,14 +156,91 @@ def test_dual_vlm_nodes_write_separate_outputs(monkeypatch: pytest.MonkeyPatch) 
             base_url="https://dashscope-intl.aliyuncs.com/api/v1",
         ),
     )
-    monkeypatch.setattr(vlm_agent, "_invoke_gemini_vlm", lambda *_: "Gemini scene text.")
-    monkeypatch.setattr(vlm_agent, "_invoke_qwen_vlm", lambda *_: "Qwen scene text.")
+    monkeypatch.setattr(
+        vlm_agent,
+        "_invoke_gemini_vlm",
+        lambda *_: VlmSceneReport(
+            summary="Two cars are stopped at a junction.",
+            direct_observations=["Two cars are stopped.", "Lane markings are visible."],
+            signals=TrafficSceneSignals(vehicle_count=2, stopped_vehicle_count=2),
+        ),
+    )
+    monkeypatch.setattr(
+        vlm_agent,
+        "_invoke_qwen_vlm",
+        lambda *_: VlmSceneReport(
+            summary="Two vehicles wait before an intersection.",
+            direct_observations=["Two vehicles are waiting.", "Intersection approach is visible."],
+            signals=TrafficSceneSignals(vehicle_count=2, stopped_vehicle_count=2),
+        ),
+    )
 
     gemini_result = vlm_agent.gemini_vlm_node({"image_path": "frame.jpg", "metadata": {}})
     qwen_result = vlm_agent.qwen_vlm_node({"image_path": "frame.jpg", "metadata": {}})
     merged = _merge_dicts(gemini_result["vlm_outputs"], qwen_result["vlm_outputs"])
 
-    assert merged == {
-        "gemini": "Gemini scene text.",
-        "qwen": "Qwen scene text.",
-    }
+    assert merged["gemini"]["summary"] == "Two cars are stopped at a junction."
+    assert merged["qwen"]["summary"] == "Two vehicles wait before an intersection."
+    assert merged["gemini"]["signals"]["vehicle_count"] == 2
+    assert merged["qwen"]["signals"]["stopped_vehicle_count"] == 2
+
+
+def test_invoke_gemini_vlm_retries_after_max_tokens_truncation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = vlm_agent.ImagePayload(
+        source="local-file",
+        media_type="image/jpeg",
+        bytes_data=b"abcd",
+        base64_data="YWJjZA==",
+        byte_count=4,
+        width=320,
+        height=240,
+    )
+    config = vlm_agent.GeminiConfig(
+        api_key="gemini-key",
+        vlm_model="gemini-3-flash-preview",
+        max_tokens=640,
+        temperature=0.0,
+    )
+
+    class _FinishReason:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class _Candidate:
+        def __init__(self, finish_reason: str) -> None:
+            self.finish_reason = _FinishReason(finish_reason)
+
+    class _Response:
+        def __init__(self, *, parsed=None, text: str = "", finish_reason: str = "STOP") -> None:
+            self.parsed = parsed
+            self.text = text
+            self.candidates = [_Candidate(finish_reason)]
+
+    responses = [
+        _Response(text='{"summary": "Traffic is', finish_reason="MAX_TOKENS"),
+        _Response(
+            parsed=VlmSceneReport(
+                summary="Cars move along a clear roadway.",
+                direct_observations=["Cars move along the roadway."],
+                signals=TrafficSceneSignals(vehicle_count=4),
+            ),
+            finish_reason="STOP",
+        ),
+    ]
+    requested_limits: list[int] = []
+
+    monkeypatch.setattr(vlm_agent, "_build_gemini_client", lambda *_: object())
+
+    def _request(*_args):
+        requested_limits.append(_args[-1])
+        return responses.pop(0)
+
+    monkeypatch.setattr(vlm_agent, "_request_gemini_scene_response", _request)
+
+    report = vlm_agent._invoke_gemini_vlm(payload, config)
+
+    assert requested_limits == [640, 2048]
+    assert report.summary == "Cars move along a clear roadway."
+    assert report.signals.vehicle_count == 4

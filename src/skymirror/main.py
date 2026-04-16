@@ -109,6 +109,7 @@ def _build_history_entry(final_state: dict[str, Any]) -> dict[str, Any]:
     """Persist only the fields needed by downstream temporal reasoning."""
     return {
         "image_path": final_state.get("image_path", ""),
+        "validated_scene": final_state.get("validated_scene", {}),
         "validated_text": final_state.get("validated_text", ""),
         "validated_signals": final_state.get("validated_signals", {}),
         "expert_results": final_state.get("expert_results", {}),
@@ -118,6 +119,7 @@ def _build_history_entry(final_state: dict[str, Any]) -> dict[str, Any]:
 def _trace_run_pipeline_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
     history_context = inputs.get("history_context") or []
     return {
+        "workflow_mode": str(inputs.get("workflow_mode", "frame")),
         "image_path": str(inputs.get("image_path", "")),
         "history_count": len(history_context),
     }
@@ -159,14 +161,21 @@ def _run_pipeline(
     logger.info("Pipeline start — image: %s", image_path)
 
     initial_state = {
+        "workflow_mode": "frame",
         "image_path": image_path,
+        "target_date": "",
+        "oa_log_dir": "",
+        "output_dir": "",
+        "report_path": "",
         # Remaining fields start empty; each node populates its own slice
         "guardrail_result": {},
         "vlm_outputs": {},
+        "validated_scene": {},
         "validated_text": "",
         "validated_signals": {},
         "history_context": history_context or [],
         "active_experts": [],
+        "next_nodes": [],
         "expert_results": {},
         "alerts": [],
         "metadata": {},
@@ -286,10 +295,20 @@ def _run_single_shot(app: Any, image_path: str) -> None:
 
 def _run_report() -> None:
     """Generate the daily report immediately and exit."""
-    from skymirror.agents.report_generator import generate_daily_report
+    from skymirror.graph.graph import app
+
     logger.info("Generating daily report on demand.")
-    generate_daily_report()
-    logger.info("Daily report complete.")
+    final_state = app.invoke(
+        {
+            "workflow_mode": "report",
+            "target_date": "",
+            "oa_log_dir": "data/oa_log",
+            "output_dir": "data/reports",
+            "report_path": "",
+            "metadata": {},
+        }
+    )
+    logger.info("Daily report complete: %s", final_state.get("report_path", "(unknown)"))
 
 
 # ---------------------------------------------------------------------------

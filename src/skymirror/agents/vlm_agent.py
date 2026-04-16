@@ -19,6 +19,7 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 from skymirror.agents.prompts import GUARDRAIL_SYSTEM_PROMPT, VLM_SYSTEM_PROMPT
+from skymirror.agents.scene_schema import VlmSceneReport, coerce_model
 from skymirror.graph.state import SkymirrorState
 from skymirror.tools.llm_factory import build_openai_chat_model, get_openai_agent_model
 
@@ -28,19 +29,34 @@ _DEFAULT_GEMINI_VLM_MODEL = "gemini-3-flash-preview"
 _DEFAULT_OPENAI_GUARDRAIL_MODEL = "gpt-5.4-mini"
 _DEFAULT_QWEN_VLM_MODEL = "qwen3.6-plus"
 _DEFAULT_DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/api/v1"
-_DEFAULT_MAX_TOKENS = 384
+_DEFAULT_MAX_TOKENS = 2048
 _DEFAULT_TEMPERATURE = 0.0
 _DEFAULT_GUARDRAIL_MAX_TOKENS = 256
 _IMAGE_FETCH_TIMEOUT_SECONDS = 10.0
 _MIN_IMAGE_DIMENSION = 32
 _MAX_IMAGE_DIMENSION = 8192
 _SUPPORTED_MEDIA_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
+_GEMINI_RECOVERY_MAX_TOKENS = 2048
 
 _VLM_USER_PROMPT = (
-    "Describe this traffic camera frame in concise factual language. Include "
-    "only directly visible traffic details: vehicle positions, pedestrian "
-    "presence, signals, lane usage, road markings, obstructions, hazards, and "
-    "visibility conditions."
+    "Return one JSON object with exactly these top-level fields:\n"
+    "- summary: 1 to 3 sentences describing the traffic scene using only directly visible facts.\n"
+    "- direct_observations: 4 to 10 short atomic observations.\n"
+    "- road_features: visible roadway layout or markings such as intersection, junction, crosswalk, stop line, shoulder, lane arrows, bus lane, median, yellow box junction.\n"
+    "- traffic_controls: visible signals or signs such as red traffic light, green traffic light, turn arrow, pedestrian signal, overhead sign.\n"
+    "- notable_hazards: directly visible hazards or disruptions such as standing water, debris, blocked lane, collision damage, poor visibility.\n"
+    "- signals: object with these exact fields and conservative values only:\n"
+    "  vehicle_count, stopped_vehicle_count, pedestrian_present, blocked_lanes, queueing,\n"
+    "  water_present, construction_present, obstacle_present, low_visibility,\n"
+    "  lighting_abnormal, wrong_way_cue, collision_cue, dangerous_crossing_cue,\n"
+    "  conflict_risk_cue.\n\n"
+    "Signal guidance:\n"
+    "- Count only clearly visible vehicles.\n"
+    "- stopped_vehicle_count counts vehicles clearly stationary in the frame.\n"
+    "- blocked_lanes is the number of lanes visibly obstructed right now.\n"
+    "- Set *_cue booleans true only when the cue is directly observable.\n"
+    "- If uncertain, use false or 0.\n"
+    "- Return JSON only. No markdown, no prose outside the JSON object."
 )
 
 _QWEN_VLM_PROMPT = f"{VLM_SYSTEM_PROMPT}\n\n{_VLM_USER_PROMPT}"
@@ -264,6 +280,70 @@ def _normalize_guardrail_assessment(assessment: GuardrailAssessment) -> Guardrai
     return assessment.model_copy(update={"allowed": False})
 
 
+def _coerce_scene_report(value: Any) -> VlmSceneReport:
+    return coerce_model(value, VlmSceneReport)
+
+
+def _build_gemini_client(api_key: str) -> Any:
+    from google import genai
+
+    return genai.Client(api_key=api_key)
+
+
+def _request_gemini_scene_response(
+    client: Any,
+    image: ImagePayload,
+    config: GeminiConfig,
+    max_output_tokens: int,
+) -> Any:
+    from google.genai import types
+
+    return client.models.generate_content(
+        model=config.vlm_model,
+        contents=[
+            types.Part.from_bytes(data=image.bytes_data, mime_type=image.media_type),
+            _VLM_USER_PROMPT,
+        ],
+        config=types.GenerateContentConfig(
+            system_instruction=VLM_SYSTEM_PROMPT,
+            temperature=config.temperature,
+            max_output_tokens=max_output_tokens,
+            response_mime_type="application/json",
+            response_schema=VlmSceneReport,
+        ),
+    )
+
+
+def _gemini_finish_reason_name(response: Any) -> str:
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        return ""
+
+    finish_reason = getattr(candidates[0], "finish_reason", None)
+    if finish_reason is None:
+        return ""
+
+    name = getattr(finish_reason, "name", None)
+    if isinstance(name, str):
+        return name.upper()
+
+    text = str(finish_reason).upper()
+    if "." in text:
+        return text.rsplit(".", 1)[-1]
+    return text
+
+
+def _extract_gemini_scene_report(response: Any) -> VlmSceneReport:
+    parsed = getattr(response, "parsed", None)
+    if parsed is not None:
+        return _coerce_scene_report(parsed)
+
+    if getattr(response, "text", None):
+        return _coerce_scene_report(response.text)
+
+    raise RuntimeError("Gemini VLM returned no structured scene report.")
+
+
 def _classify_image_safety(image: ImagePayload, config: OpenAIGuardrailConfig) -> GuardrailAssessment:
     llm = build_openai_chat_model(
         temperature=config.temperature,
@@ -291,27 +371,33 @@ def _classify_image_safety(image: ImagePayload, config: OpenAIGuardrailConfig) -
     raise RuntimeError("OpenAI guardrail returned no structured assessment.")
 
 
-def _invoke_gemini_vlm(image: ImagePayload, config: GeminiConfig) -> str:
-    from google import genai
-    from google.genai import types
+def _invoke_gemini_vlm(image: ImagePayload, config: GeminiConfig) -> VlmSceneReport:
+    client = _build_gemini_client(config.api_key)
+    response = _request_gemini_scene_response(client, image, config, config.max_tokens)
 
-    client = genai.Client(api_key=config.api_key)
-    response = client.models.generate_content(
-        model=config.vlm_model,
-        contents=[
-            types.Part.from_bytes(data=image.bytes_data, mime_type=image.media_type),
-            _VLM_USER_PROMPT,
-        ],
-        config=types.GenerateContentConfig(
-            system_instruction=VLM_SYSTEM_PROMPT,
-            temperature=config.temperature,
-            max_output_tokens=config.max_tokens,
-        ),
-    )
-    return (response.text or "").strip()
+    try:
+        return _extract_gemini_scene_report(response)
+    except Exception:
+        finish_reason = _gemini_finish_reason_name(response)
+        recovery_max_tokens = max(config.max_tokens, _GEMINI_RECOVERY_MAX_TOKENS)
+        if finish_reason != "MAX_TOKENS" or recovery_max_tokens <= config.max_tokens:
+            raise
+
+        logger.warning(
+            "gemini_vlm: Response hit MAX_TOKENS at %d; retrying with %d.",
+            config.max_tokens,
+            recovery_max_tokens,
+        )
+        retry_response = _request_gemini_scene_response(
+            client,
+            image,
+            config,
+            recovery_max_tokens,
+        )
+        return _extract_gemini_scene_report(retry_response)
 
 
-def _invoke_qwen_vlm(image: ImagePayload, config: QwenConfig) -> str:
+def _invoke_qwen_vlm(image: ImagePayload, config: QwenConfig) -> VlmSceneReport:
     import dashscope
     from dashscope import MultiModalConversation
 
@@ -335,7 +421,7 @@ def _invoke_qwen_vlm(image: ImagePayload, config: QwenConfig) -> str:
     except (AttributeError, IndexError, KeyError, TypeError) as exc:
         raise RuntimeError(f"Qwen returned an unexpected response shape: {response!r}") from exc
 
-    return _extract_text_content(content)
+    return _coerce_scene_report(_extract_text_content(content))
 
 
 def _build_blocked_guardrail_result(reason: str, *, category: str) -> dict[str, Any]:
@@ -431,20 +517,23 @@ def image_guardrail_node(state: SkymirrorState) -> dict[str, Any]:
 
 
 def gemini_vlm_node(state: SkymirrorState) -> dict[str, Any]:
-    """Generate a traffic-scene description with Gemini."""
+    """Generate a structured traffic-scene report with Gemini."""
     image_path = state.get("image_path")
     if not image_path:
         raise ValueError("gemini_vlm_node requires state['image_path'].")
 
     image = _build_image_payload(image_path)
     config = _load_gemini_config()
-    text = _invoke_gemini_vlm(image, config)
-    if not text:
-        raise RuntimeError("Gemini VLM returned an empty description.")
+    report = _invoke_gemini_vlm(image, config)
+    if not report.summary and not report.direct_observations:
+        raise RuntimeError("Gemini VLM returned an empty scene report.")
 
-    logger.info("gemini_vlm: Generated description (%d chars).", len(text))
+    logger.info(
+        "gemini_vlm: Generated scene report (%d observations).",
+        len(report.direct_observations),
+    )
     return {
-        "vlm_outputs": {"gemini": text},
+        "vlm_outputs": {"gemini": report.model_dump()},
         "metadata": {
             "vlm": {
                 "gemini": {
@@ -455,6 +544,8 @@ def gemini_vlm_node(state: SkymirrorState) -> dict[str, Any]:
                     "width": image.width,
                     "height": image.height,
                     "byte_count": image.byte_count,
+                    "summary_chars": len(report.summary),
+                    "observation_count": len(report.direct_observations),
                 }
             }
         },
@@ -462,20 +553,23 @@ def gemini_vlm_node(state: SkymirrorState) -> dict[str, Any]:
 
 
 def qwen_vlm_node(state: SkymirrorState) -> dict[str, Any]:
-    """Generate a traffic-scene description with Qwen 3.6 Plus."""
+    """Generate a structured traffic-scene report with Qwen 3.6 Plus."""
     image_path = state.get("image_path")
     if not image_path:
         raise ValueError("qwen_vlm_node requires state['image_path'].")
 
     image = _build_image_payload(image_path)
     config = _load_qwen_config()
-    text = _invoke_qwen_vlm(image, config)
-    if not text:
-        raise RuntimeError("Qwen VLM returned an empty description.")
+    report = _invoke_qwen_vlm(image, config)
+    if not report.summary and not report.direct_observations:
+        raise RuntimeError("Qwen VLM returned an empty scene report.")
 
-    logger.info("qwen_vlm: Generated description (%d chars).", len(text))
+    logger.info(
+        "qwen_vlm: Generated scene report (%d observations).",
+        len(report.direct_observations),
+    )
     return {
-        "vlm_outputs": {"qwen": text},
+        "vlm_outputs": {"qwen": report.model_dump()},
         "metadata": {
             "vlm": {
                 "qwen": {
@@ -487,6 +581,8 @@ def qwen_vlm_node(state: SkymirrorState) -> dict[str, Any]:
                     "width": image.width,
                     "height": image.height,
                     "byte_count": image.byte_count,
+                    "summary_chars": len(report.summary),
+                    "observation_count": len(report.direct_observations),
                 }
             }
         },

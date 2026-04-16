@@ -73,9 +73,15 @@ class OrchestratorDecision(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _build_dispatch_prompt(
+    validated_scene: dict[str, Any],
     validated_text: str,
     validated_signals: dict[str, Any],
 ) -> str:
+    scene_block = (
+        json.dumps(validated_scene, indent=2)
+        if validated_scene
+        else "(no fused scene JSON available)"
+    )
     signals_block = (
         json.dumps(validated_signals, indent=2)
         if validated_signals
@@ -83,7 +89,9 @@ def _build_dispatch_prompt(
     )
     return (
         "## DISPATCH MODE\n\n"
-        "expert_results: (empty — no experts have run yet)\n\n"
+        "expert_results: (empty - no experts have run yet)\n\n"
+        "Fused validator JSON:\n"
+        f"{scene_block}\n\n"
         "Validated traffic-scene description:\n"
         f"{validated_text or '(empty)'}\n\n"
         "Structured signals extracted by the validator:\n"
@@ -116,6 +124,7 @@ def _invoke_orchestrator_llm(state: SkymirrorState) -> OrchestratorDecision:
 
     if not expert_results:
         user_content = _build_dispatch_prompt(
+            validated_scene=dict(state.get("validated_scene") or {}),
             validated_text=state.get("validated_text", ""),
             validated_signals=dict(state.get("validated_signals") or {}),
         )
@@ -161,14 +170,14 @@ def orchestrator_node(state: SkymirrorState) -> dict[str, Any]:
         decision = _invoke_orchestrator_llm(state)
         raw_nodes: list[str] = list(decision.next_nodes)
         logger.info(
-            "orchestrator_agent [%s]: LLM → next_nodes=%s reasoning=%r",
+            "orchestrator_agent [%s]: LLM -> next_nodes=%s reasoning=%r",
             mode,
             raw_nodes,
             decision.reasoning,
         )
     except Exception as exc:
         logger.warning(
-            "orchestrator_agent [%s]: LLM call failed (%s) — applying safety fallback.",
+            "orchestrator_agent [%s]: LLM call failed (%s) - applying safety fallback.",
             mode,
             exc,
         )
@@ -181,7 +190,7 @@ def orchestrator_node(state: SkymirrorState) -> dict[str, Any]:
         if not next_nodes:
             logger.warning(
                 "orchestrator_agent [dispatch]: No valid experts in LLM output %s "
-                "— falling back to all experts.",
+                "- falling back to all experts.",
                 raw_nodes,
             )
             next_nodes = _ALL_EXPERTS
@@ -191,7 +200,7 @@ def orchestrator_node(state: SkymirrorState) -> dict[str, Any]:
         if not next_nodes:
             logger.warning(
                 "orchestrator_agent [evaluate]: No valid terminal decision in LLM output %s "
-                "— falling back to alert_manager.",
+                "- falling back to alert_manager.",
                 raw_nodes,
             )
             next_nodes = ["alert_manager"]
