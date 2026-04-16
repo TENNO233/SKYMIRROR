@@ -41,6 +41,7 @@ SIGINT (Ctrl-C) and SIGTERM both trigger a clean exit:
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import logging
 import os
 import signal
@@ -55,6 +56,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+_HISTORY_WINDOW_SIZE: int = 5
 
 # ---------------------------------------------------------------------------
 # Shutdown flag — set by signal handlers, checked in the main loop
@@ -100,13 +102,28 @@ def _configure_logging() -> None:
 # Pipeline runner (single iteration)
 # ---------------------------------------------------------------------------
 
-def _run_pipeline(image_path: str, app: Any) -> None:
+def _build_history_entry(final_state: dict[str, Any]) -> dict[str, Any]:
+    """Persist only the fields needed by downstream temporal reasoning."""
+    return {
+        "image_path": final_state.get("image_path", ""),
+        "validated_text": final_state.get("validated_text", ""),
+        "validated_signals": final_state.get("validated_signals", {}),
+        "expert_results": final_state.get("expert_results", {}),
+    }
+
+
+def _run_pipeline(
+    image_path: str,
+    app: Any,
+    history_context: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     """
     Invoke the LangGraph pipeline for one camera frame and log the results.
 
     Args:
         image_path: Absolute path to the saved camera frame.
-        app:        Compiled LangGraph `CompiledGraph` (from `graph.graph`).
+        app:             Compiled LangGraph `CompiledGraph` (from `graph.graph`).
+        history_context: Recent same-camera frame summaries for temporal cues.
     """
     logger.info("Pipeline start — image: %s", image_path)
 
@@ -115,6 +132,8 @@ def _run_pipeline(image_path: str, app: Any) -> None:
         # Remaining fields start empty; each node populates its own slice
         "vlm_text": "",
         "validated_text": "",
+        "validated_signals": {},
+        "history_context": history_context or [],
         "active_experts": [],
         "expert_results": {},
         "alerts": [],
@@ -126,7 +145,7 @@ def _run_pipeline(image_path: str, app: Any) -> None:
     except Exception as exc:
         # Pipeline errors must NOT crash the daemon — log and continue
         logger.error("Pipeline raised an unhandled exception: %s", exc, exc_info=True)
-        return
+        return None
 
     alerts: list[dict] = final_state.get("alerts", [])
 
@@ -141,6 +160,8 @@ def _run_pipeline(image_path: str, app: Any) -> None:
             logger.warning("  [%d/%d] [%s] %s — %s", i, len(alerts), severity, alert_type, message)
     else:
         logger.info("Pipeline complete — no alerts generated for this frame.")
+
+    return final_state
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +197,7 @@ def _run_daemon(
     )
 
     iteration = 0
+    camera_history: deque[dict[str, Any]] = deque(maxlen=_HISTORY_WINDOW_SIZE)
 
     while not _shutdown_requested:
         iteration += 1
@@ -195,7 +217,13 @@ def _run_daemon(
             )
         else:
             # 2. Run the LangGraph pipeline
-            _run_pipeline(image_path, app)
+            final_state = _run_pipeline(
+                image_path,
+                app,
+                history_context=list(camera_history),
+            )
+            if final_state is not None:
+                camera_history.append(_build_history_entry(final_state))
 
         # 3. Sleep until next cycle, checking shutdown flag every second
         #    so we don't block a SIGTERM for up to `interval` seconds.
@@ -212,7 +240,7 @@ def _run_single_shot(app: Any, image_path: str) -> None:
     if not Path(image_path).is_file():
         logger.error("--image path does not exist: %s", image_path)
         sys.exit(1)
-    _run_pipeline(image_path, app)
+    _run_pipeline(image_path, app, history_context=[])
 
 
 def _run_report() -> None:

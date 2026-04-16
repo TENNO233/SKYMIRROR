@@ -1,27 +1,9 @@
 """
 edges.py — Conditional Routing Logic for SKYMIRROR
-====================================================
-This module implements the *orchestrator* layer: a pure routing function that
-inspects `validated_text` and decides which expert nodes should run next.
-
-Routing strategy
-----------------
-Keywords found in `validated_text` are matched against three domain-specific
-keyword sets.  Matching is case-insensitive.  Multiple experts can be activated
-simultaneously; they will run in *parallel* via LangGraph's `Send` API.
-
-Fallback
---------
-If no keyword matches are found the frame is considered low-risk and the
-pipeline skips directly to `alert_manager` (which may then emit a "no issues"
-alert or simply produce an empty alert list).
-
-LangGraph integration
----------------------
-`route_to_experts` is registered as the routing function for a
-`add_conditional_edges` call in `graph.py`.  It must return either:
-  - A `list[Send]`  → fan-out to one or more expert nodes in parallel.
-  - A `str`         → go directly to that node (used for the fallback path).
+==================================================
+The router performs coarse expert selection using normalized `validated_text`
+plus lightweight `validated_signals`. Fine-grained classification happens
+inside each expert node.
 """
 
 from __future__ import annotations
@@ -35,156 +17,134 @@ from skymirror.graph.state import SkymirrorState
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Keyword Taxonomy
-# ---------------------------------------------------------------------------
-# Each set covers the vocabulary a VLM is likely to produce for its domain.
-# Extend these sets as your VLM vocabulary is refined.
-
 ORDER_KEYWORDS: frozenset[str] = frozenset(
     {
-        # Traffic-flow violations
-        "wrong way",
-        "illegal turn",
-        "red light",
-        "traffic violation",
-        "running light",
-        "lane change",
-        "overtaking",
-        "no entry",
+        "illegal parking",
+        "double parked",
+        "lane obstruction",
+        "blocked lane",
+        "occupying lane",
         "congestion",
+        "traffic jam",
         "gridlock",
         "queue",
-        "blocked intersection",
-        "jaywalking",
-        "pedestrian violation",
-        "double parking",
-        "illegal parking",
+        "queueing",
+        "vehicle loitering",
+        "stationary for long",
     }
 )
 
 SAFETY_KEYWORDS: frozenset[str] = frozenset(
     {
-        # Accident / hazard vocabulary
-        "accident",
         "collision",
+        "suspected collision",
         "crash",
-        "impact",
-        "injured",
-        "injury",
-        "casualty",
-        "emergency",
-        "ambulance",
-        "fire truck",
-        "police",
-        "overturned",
-        "rollover",
-        "debris",
-        "hazard",
-        "danger",
-        "speeding",
-        "excessive speed",
-        "reckless",
+        "accident",
+        "wrong way",
+        "against traffic",
+        "dangerous crossing",
+        "jaywalking",
         "near miss",
+        "conflict risk",
+        "hard braking",
+        "swerving",
     }
 )
 
 ENVIRONMENT_KEYWORDS: frozenset[str] = frozenset(
     {
-        # Environmental / road-condition vocabulary
-        "smoke",
-        "fire",
-        "flood",
-        "waterlogged",
-        "ice",
-        "fog",
-        "dust",
-        "visibility",
-        "low visibility",
-        "pothole",
-        "road damage",
-        "oil spill",
+        "flooding",
+        "standing water",
         "construction",
         "roadwork",
-        "barrier",
+        "obstacle",
+        "debris",
         "fallen tree",
-        "debris on road",
-        "pollution",
+        "low visibility",
+        "poor visibility",
+        "glare",
+        "poor lighting",
+        "smoke",
+        "fog",
     }
 )
 
-# Mapping from keyword-set → expert node name (kept separate for clarity)
 _EXPERT_ROUTING: list[tuple[frozenset[str], str]] = [
     (ORDER_KEYWORDS, "order_expert"),
     (SAFETY_KEYWORDS, "safety_expert"),
     (ENVIRONMENT_KEYWORDS, "environment_expert"),
 ]
 
-# Fallback target when no keywords match
+_EXPERT_SIGNAL_FIELDS: dict[str, tuple[str, ...]] = {
+    "order_expert": ("queueing", "blocked_lanes", "stopped_vehicle_count"),
+    "safety_expert": (
+        "wrong_way_cue",
+        "collision_cue",
+        "dangerous_crossing_cue",
+        "conflict_risk_cue",
+    ),
+    "environment_expert": (
+        "water_present",
+        "construction_present",
+        "obstacle_present",
+        "low_visibility",
+        "lighting_abnormal",
+    ),
+}
+
 _FALLBACK_NODE: str = "alert_manager"
 
 
-# ---------------------------------------------------------------------------
-# Public Routing Function
-# ---------------------------------------------------------------------------
+def _signal_activates_expert(expert_node: str, signals: dict[str, object]) -> bool:
+    """Check whether structured validator signals are enough to route to an expert."""
+    if expert_node == "order_expert":
+        return (
+            bool(signals.get("queueing"))
+            or int(signals.get("blocked_lanes", 0) or 0) > 0
+            or int(signals.get("stopped_vehicle_count", 0) or 0) > 0
+        )
+    return any(bool(signals.get(field)) for field in _EXPERT_SIGNAL_FIELDS[expert_node])
+
 
 def route_to_experts(
     state: SkymirrorState,
 ) -> Union[list[Send], str]:
     """
-    Conditional edge function: orchestrates which expert nodes run next.
-
-    Called by LangGraph immediately after `validator_agent` completes.
-
-    Algorithm
-    ---------
-    1. Lower-case `validated_text` once (O(n) string operation).
-    2. For each expert domain, check whether *any* keyword is present in the
-       text (short-circuits on first match for efficiency).
-    3. Build a list of `Send(node_name, state)` objects for all matched experts.
-    4. If the list is empty → return the fallback node name as a plain string.
+    Resolve which expert nodes should process the current frame.
 
     Args:
-        state: Current pipeline state.  `validated_text` must be populated.
+        state: Current pipeline state after validator execution.
 
     Returns:
-        A list of `Send` objects for parallel fan-out to matched expert nodes,
-        OR the string `"alert_manager"` when no experts are required.
+        A list of `Send` objects for parallel expert execution or the fallback
+        alert manager node when nothing matches.
     """
-    validated_text: str = state.get("validated_text", "")  # type: ignore[assignment]
+    validated_text = state.get("validated_text", "")
+    validated_signals = state.get("validated_signals", {})
 
-    if not validated_text:
+    if not validated_text and not validated_signals:
         logger.warning(
-            "route_to_experts: `validated_text` is empty — skipping to %s",
+            "route_to_experts: validator output is empty — skipping to %s",
             _FALLBACK_NODE,
         )
         return _FALLBACK_NODE
 
     text_lower = validated_text.lower()
-
-    # Determine which experts to activate
-    active_experts: list[str] = [
-        expert_node
-        for keywords, expert_node in _EXPERT_ROUTING
-        if any(kw in text_lower for kw in keywords)
-    ]
+    active_experts: list[str] = []
+    for keywords, expert_node in _EXPERT_ROUTING:
+        if any(keyword in text_lower for keyword in keywords) or _signal_activates_expert(
+            expert_node,
+            validated_signals,
+        ):
+            active_experts.append(expert_node)
 
     if not active_experts:
         logger.info(
-            "route_to_experts: No domain keywords matched in validated text — "
-            "routing directly to %s (fallback).",
+            "route_to_experts: No expert matches found — routing directly to %s.",
             _FALLBACK_NODE,
         )
         return _FALLBACK_NODE
 
-    logger.info(
-        "route_to_experts: Activated experts → %s",
-        active_experts,
-    )
-
-    # Inject the resolved list into state so nodes can introspect it if needed
-    # (LangGraph merges this partial update before calling each Send target)
+    logger.info("route_to_experts: Activated experts → %s", active_experts)
     state_with_experts: SkymirrorState = {**state, "active_experts": active_experts}  # type: ignore[misc]
-
-    # Fan-out: each Send dispatches one expert node with an independent state copy
     return [Send(expert, state_with_experts) for expert in active_experts]

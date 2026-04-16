@@ -1,24 +1,4 @@
 """Alert Generation Agent — Orchestration Entry Point
-=====================================================
-
-Identity
---------
-I am SKYMIRROR's alert generation surface. When OA determines that expert
-analysis results warrant an alert, it calls me with expert_results,
-image_path, and optional context. I orchestrate tools to classify, render,
-and dispatch structured alerts.
-
-I am NOT a fixed pipeline node. I am an independent agent invoked on-demand
-by OA (Orchestrator Agent).
-
-Tasks
------
-1. For each expert in expert_results: skip if findings are empty.
-2. Call classification tool to determine sub_type, severity, and message.
-3. Call rendering tool to assemble the complete alert dict with evidence
-   and regulation citations (XAI: process transparency + source attribution).
-4. Call dispatcher tool to write alert files and dispatch log.
-5. Return the list of generated alerts to OA.
 
 Tools
 -----
