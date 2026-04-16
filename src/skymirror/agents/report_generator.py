@@ -49,6 +49,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from langsmith import traceable
+
 from skymirror.tools.llm_factory import narrate
 from skymirror.tools.daily_report.loader import load_oa_log, yesterday_sgt
 from skymirror.tools.daily_report.analysis import (
@@ -69,14 +71,34 @@ from skymirror.tools.daily_report.rendering import (
     render_system_profile_section,
     render_temporal_section,
 )
+from skymirror.tools.langsmith_utils import flush_langsmith_traces
 
 logger = logging.getLogger(__name__)
+
+
+def _trace_generate_report_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    target_date = inputs.get("target_date")
+    return {
+        "target_date": target_date.isoformat() if hasattr(target_date, "isoformat") else str(target_date),
+        "oa_log_dir": str(inputs.get("oa_log_dir", "")),
+        "output_dir": str(inputs.get("output_dir", "")),
+    }
+
+
+def _trace_generate_report_output(output: Path) -> dict[str, str]:
+    return {"report_path": str(output)}
 
 
 # ---------------------------------------------------------------------------
 # Core orchestrator
 # ---------------------------------------------------------------------------
 
+@traceable(
+    name="generate_report",
+    run_type="chain",
+    process_inputs=_trace_generate_report_inputs,
+    process_outputs=_trace_generate_report_output,
+)
 def generate_report(
     target_date: date,
     oa_log_dir: Path | str,
@@ -210,15 +232,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    args = _parse_args(argv)
-    target = args.date or yesterday_sgt()
-    path = generate_report(
-        target_date=target,
-        oa_log_dir=args.oa_log_dir,
-        output_dir=args.output_dir,
-    )
-    print(str(path))
-    return 0
+    try:
+        args = _parse_args(argv)
+        target = args.date or yesterday_sgt()
+        path = generate_report(
+            target_date=target,
+            oa_log_dir=args.oa_log_dir,
+            output_dir=args.output_dir,
+        )
+        print(str(path))
+        return 0
+    finally:
+        flush_langsmith_traces()
 
 
 if __name__ == "__main__":

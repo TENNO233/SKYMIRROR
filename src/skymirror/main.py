@@ -51,6 +51,9 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from langsmith import traceable
+
+from skymirror.tools.langsmith_utils import flush_langsmith_traces
 
 # Load .env FIRST — before any module that reads os.environ
 load_dotenv()
@@ -112,6 +115,34 @@ def _build_history_entry(final_state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _trace_run_pipeline_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    history_context = inputs.get("history_context") or []
+    return {
+        "image_path": str(inputs.get("image_path", "")),
+        "history_count": len(history_context),
+    }
+
+
+def _trace_run_pipeline_output(output: dict[str, Any] | None) -> dict[str, Any]:
+    if output is None:
+        return {"status": "failed"}
+
+    guardrail_result = output.get("guardrail_result", {})
+    blocked = bool(guardrail_result and not guardrail_result.get("allowed", False))
+    return {
+        "status": "blocked" if blocked else "completed",
+        "alerts_count": len(output.get("alerts", [])),
+        "active_experts": list(output.get("active_experts", [])),
+        "has_validated_text": bool(output.get("validated_text", "").strip()),
+    }
+
+
+@traceable(
+    name="run_pipeline",
+    run_type="chain",
+    process_inputs=_trace_run_pipeline_inputs,
+    process_outputs=_trace_run_pipeline_output,
+)
 def _run_pipeline(
     image_path: str,
     app: Any,
@@ -292,6 +323,7 @@ def main() -> None:
     """Application entry point."""
     _configure_logging()
     args = _parse_args()
+    scheduler: Any = None
 
     # Register OS signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, _handle_signal)
@@ -304,6 +336,7 @@ def main() -> None:
     # --report mode: no pipeline needed
     if args.report:
         _run_report()
+        flush_langsmith_traces()
         return
 
     # --- Import the compiled LangGraph app -----------------------------------
@@ -318,6 +351,7 @@ def main() -> None:
     # --image mode: single-shot, no scheduler needed
     if args.image:
         _run_single_shot(app, args.image)
+        flush_langsmith_traces()
         return
 
     # --- Daemon mode: read configuration -------------------------------------
@@ -368,6 +402,7 @@ def main() -> None:
         if scheduler is not None:
             scheduler.shutdown(wait=False)
             logger.info("APScheduler shut down.")
+        flush_langsmith_traces()
         logger.info("SKYMIRROR shut down. Goodbye.")
 
 

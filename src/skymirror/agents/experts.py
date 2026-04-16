@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Literal
 
 from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from skymirror.agents.prompts import (
@@ -32,6 +33,7 @@ from skymirror.graph.state import (
     SkymirrorState,
     ValidatedSignals,
 )
+from skymirror.tools.llm_factory import build_openai_chat_model, get_openai_agent_model
 from skymirror.tools.pinecone_retriever import get_pinecone_retriever
 
 logger = logging.getLogger(__name__)
@@ -39,7 +41,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # 1. CONFIG & RAG MODELS (From Savion's Branch)
 # ============================================================================
-_DEFAULT_GEMINI_EXPERT_MODEL = "gemini-3.1-pro-preview"
+_DEFAULT_OPENAI_EXPERT_MODEL = "gpt-5.4-mini"
 _DEFAULT_RAG_TOP_K = 5
 _DEFAULT_TEMPERATURE = 0.0
 _DEFAULT_MAX_TOKENS = 512
@@ -110,9 +112,12 @@ def _read_float_env(name: str, default: float) -> float:
 
 def _load_expert_model_config() -> dict[str, Any]:
     return {
-        "api_key": _read_required_env("GEMINI_API_KEY"),
-        "model": os.getenv("GEMINI_EXPERT_MODEL", _DEFAULT_GEMINI_EXPERT_MODEL).strip()
-        or _DEFAULT_GEMINI_EXPERT_MODEL,
+        "api_key": _read_required_env("OPENAI_API_KEY"),
+        "model": os.getenv(
+            "OPENAI_EXPERT_MODEL",
+            os.getenv("OPENAI_AGENT_MODEL", _DEFAULT_OPENAI_EXPERT_MODEL),
+        ).strip()
+        or get_openai_agent_model(),
         "temperature": _read_float_env("EXPERT_TEMPERATURE", _DEFAULT_TEMPERATURE),
         "max_tokens": _read_int_env("EXPERT_MAX_TOKENS", _DEFAULT_MAX_TOKENS),
         "top_k": _read_int_env("RAG_TOP_K", _DEFAULT_RAG_TOP_K),
@@ -144,29 +149,25 @@ def _build_expert_prompt(spec: ExpertSpec, validated_text: str, documents: list[
     )
 
 def _invoke_expert_llm(spec: ExpertSpec, validated_text: str, documents: list[Document]) -> ExpertAssessment:
-    from google import genai
-    from google.genai import types
-
     config = _load_expert_model_config()
-    client = genai.Client(api_key=config["api_key"])
-    
-    response = client.models.generate_content(
+    llm = build_openai_chat_model(
+        temperature=config["temperature"],
         model=config["model"],
-        contents=_build_expert_prompt(spec, validated_text, documents),
-        config=types.GenerateContentConfig(
-            system_instruction=spec.system_prompt,
-            temperature=config["temperature"],
-            max_output_tokens=config["max_tokens"],
-            response_mime_type="application/json",
-            response_schema=ExpertAssessment,
-        ),
+        api_key=config["api_key"],
+        max_tokens=config["max_tokens"],
     )
-    parsed = getattr(response, "parsed", None)
-    if isinstance(parsed, ExpertAssessment):
-        return parsed
-    if getattr(response, "text", None):
-        return ExpertAssessment.model_validate_json(response.text)
-    raise RuntimeError(f"{spec.name}: Gemini expert model returned no structured assessment.")
+    structured_llm = llm.with_structured_output(ExpertAssessment)
+    response = structured_llm.invoke(
+        [
+            SystemMessage(content=spec.system_prompt),
+            HumanMessage(content=_build_expert_prompt(spec, validated_text, documents)),
+        ]
+    )
+    if isinstance(response, ExpertAssessment):
+        return response
+    if isinstance(response, dict):
+        return ExpertAssessment.model_validate(response)
+    raise RuntimeError(f"{spec.name}: OpenAI expert model returned no structured assessment.")
 
 # ============================================================================
 # 2. RULE-BASED PATTERNS & LOGIC (From Main Branch)

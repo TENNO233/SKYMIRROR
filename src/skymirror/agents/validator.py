@@ -1,6 +1,4 @@
-"""
-validator.py - Gemini reconciliation node for dual-VLM output.
-"""
+"""validator.py - OpenAI reconciliation node for dual-VLM output."""
 
 from __future__ import annotations
 
@@ -9,12 +7,15 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from skymirror.agents.prompts import VALIDATOR_SYSTEM_PROMPT
 from skymirror.graph.state import SkymirrorState
+from skymirror.tools.llm_factory import build_openai_chat_model, get_openai_agent_model
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_GEMINI_VALIDATOR_MODEL = "gemini-3.1-pro-preview"
+_DEFAULT_OPENAI_VALIDATOR_MODEL = "gpt-5.4-mini"
 _DEFAULT_MAX_TOKENS = 384
 _DEFAULT_TEMPERATURE = 0.0
 
@@ -50,19 +51,19 @@ def _read_float_env(name: str, default: float) -> float:
 
 
 def _load_validator_config() -> ValidatorConfig:
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("Environment variable GEMINI_API_KEY is required.")
+        raise RuntimeError("Environment variable OPENAI_API_KEY is required.")
 
     return ValidatorConfig(
         api_key=api_key,
         model=os.getenv(
-            "GEMINI_VALIDATOR_MODEL",
-            _DEFAULT_GEMINI_VALIDATOR_MODEL,
+            "OPENAI_VALIDATOR_MODEL",
+            os.getenv("OPENAI_AGENT_MODEL", _DEFAULT_OPENAI_VALIDATOR_MODEL),
         ).strip()
-        or _DEFAULT_GEMINI_VALIDATOR_MODEL,
-        max_tokens=_read_int_env("VLM_MAX_TOKENS", _DEFAULT_MAX_TOKENS),
-        temperature=_read_float_env("VLM_TEMPERATURE", _DEFAULT_TEMPERATURE),
+        or get_openai_agent_model(),
+        max_tokens=_read_int_env("VALIDATOR_MAX_TOKENS", _DEFAULT_MAX_TOKENS),
+        temperature=_read_float_env("VALIDATOR_TEMPERATURE", _DEFAULT_TEMPERATURE),
     )
 
 
@@ -80,21 +81,45 @@ def _build_validator_prompt(gemini_text: str, qwen_text: str) -> str:
     )
 
 
-def _invoke_gemini_validator(config: ValidatorConfig, gemini_text: str, qwen_text: str) -> str:
-    from google import genai
-    from google.genai import types
+def _extract_message_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
 
-    client = genai.Client(api_key=config.api_key)
-    response = client.models.generate_content(
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                if block.strip():
+                    parts.append(block.strip())
+                continue
+
+            if isinstance(block, dict):
+                text = block.get("text")
+            else:
+                text = getattr(block, "text", None)
+
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+
+        return "\n".join(parts).strip()
+
+    return str(content).strip()
+
+
+def _invoke_openai_validator(config: ValidatorConfig, gemini_text: str, qwen_text: str) -> str:
+    llm = build_openai_chat_model(
+        temperature=config.temperature,
         model=config.model,
-        contents=_build_validator_prompt(gemini_text, qwen_text),
-        config=types.GenerateContentConfig(
-            system_instruction=VALIDATOR_SYSTEM_PROMPT,
-            temperature=config.temperature,
-            max_output_tokens=config.max_tokens,
-        ),
+        api_key=config.api_key,
+        max_tokens=config.max_tokens,
     )
-    return (response.text or "").strip()
+    response = llm.invoke(
+        [
+            SystemMessage(content=VALIDATOR_SYSTEM_PROMPT),
+            HumanMessage(content=_build_validator_prompt(gemini_text, qwen_text)),
+        ]
+    )
+    return _extract_message_text(getattr(response, "content", response))
 
 
 def validator_agent_node(state: SkymirrorState) -> dict[str, Any]:
@@ -107,16 +132,16 @@ def validator_agent_node(state: SkymirrorState) -> dict[str, Any]:
         raise ValueError("validator_agent_node requires both Gemini and Qwen outputs.")
 
     config = _load_validator_config()
-    validated_text = _invoke_gemini_validator(config, gemini_text, qwen_text)
+    validated_text = _invoke_openai_validator(config, gemini_text, qwen_text)
     if not validated_text:
-        raise RuntimeError("Gemini validator returned an empty validated_text.")
+        raise RuntimeError("OpenAI validator returned an empty validated_text.")
 
     logger.info("validator_agent: Generated validated text (%d chars).", len(validated_text))
     return {
         "validated_text": validated_text,
         "metadata": {
             "validator": {
-                "provider": "gemini",
+                "provider": "openai",
                 "model": config.model,
                 "input_sources": ["gemini", "qwen"],
                 "gemini_chars": len(gemini_text),

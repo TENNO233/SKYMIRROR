@@ -14,20 +14,23 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
+from langchain_core.messages import HumanMessage, SystemMessage
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 from skymirror.agents.prompts import GUARDRAIL_SYSTEM_PROMPT, VLM_SYSTEM_PROMPT
 from skymirror.graph.state import SkymirrorState
+from skymirror.tools.llm_factory import build_openai_chat_model, get_openai_agent_model
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_GEMINI_VLM_MODEL = "gemini-3.1-pro-preview"
-_DEFAULT_GEMINI_GUARDRAIL_MODEL = "gemini-3.1-pro-preview"
+_DEFAULT_GEMINI_VLM_MODEL = "gemini-3-flash-preview"
+_DEFAULT_OPENAI_GUARDRAIL_MODEL = "gpt-5.4-mini"
 _DEFAULT_QWEN_VLM_MODEL = "qwen3.6-plus"
 _DEFAULT_DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/api/v1"
 _DEFAULT_MAX_TOKENS = 384
 _DEFAULT_TEMPERATURE = 0.0
+_DEFAULT_GUARDRAIL_MAX_TOKENS = 256
 _IMAGE_FETCH_TIMEOUT_SECONDS = 10.0
 _MIN_IMAGE_DIMENSION = 32
 _MAX_IMAGE_DIMENSION = 8192
@@ -53,7 +56,14 @@ _GUARDRAIL_USER_PROMPT = (
 class GeminiConfig:
     api_key: str
     vlm_model: str
-    guardrail_model: str
+    max_tokens: int
+    temperature: float
+
+
+@dataclass(frozen=True)
+class OpenAIGuardrailConfig:
+    api_key: str
+    model: str
     max_tokens: int
     temperature: float
 
@@ -121,13 +131,21 @@ def _load_gemini_config() -> GeminiConfig:
         api_key=_read_required_env("GEMINI_API_KEY"),
         vlm_model=os.getenv("GEMINI_VLM_MODEL", _DEFAULT_GEMINI_VLM_MODEL).strip()
         or _DEFAULT_GEMINI_VLM_MODEL,
-        guardrail_model=os.getenv(
-            "GEMINI_GUARDRAIL_MODEL",
-            _DEFAULT_GEMINI_GUARDRAIL_MODEL,
-        ).strip()
-        or _DEFAULT_GEMINI_GUARDRAIL_MODEL,
         max_tokens=_read_int_env("VLM_MAX_TOKENS", _DEFAULT_MAX_TOKENS),
         temperature=_read_float_env("VLM_TEMPERATURE", _DEFAULT_TEMPERATURE),
+    )
+
+
+def _load_guardrail_config() -> OpenAIGuardrailConfig:
+    return OpenAIGuardrailConfig(
+        api_key=_read_required_env("OPENAI_API_KEY"),
+        model=os.getenv(
+            "OPENAI_GUARDRAIL_MODEL",
+            os.getenv("OPENAI_AGENT_MODEL", _DEFAULT_OPENAI_GUARDRAIL_MODEL),
+        ).strip()
+        or get_openai_agent_model(),
+        max_tokens=_read_int_env("GUARDRAIL_MAX_TOKENS", _DEFAULT_GUARDRAIL_MAX_TOKENS),
+        temperature=_read_float_env("GUARDRAIL_TEMPERATURE", 0.0),
     )
 
 
@@ -246,36 +264,31 @@ def _normalize_guardrail_assessment(assessment: GuardrailAssessment) -> Guardrai
     return assessment.model_copy(update={"allowed": False})
 
 
-def _classify_image_safety(image: ImagePayload, config: GeminiConfig) -> GuardrailAssessment:
-    from google import genai
-    from google.genai import types
-
-    client = genai.Client(api_key=config.api_key)
-    response = client.models.generate_content(
-        model=config.guardrail_model,
-        contents=[
-            types.Part.from_bytes(data=image.bytes_data, mime_type=image.media_type),
-            _GUARDRAIL_USER_PROMPT,
-        ],
-        config=types.GenerateContentConfig(
-            system_instruction=GUARDRAIL_SYSTEM_PROMPT,
-            temperature=0.0,
-            max_output_tokens=256,
-            response_mime_type="application/json",
-            response_schema=GuardrailAssessment,
-        ),
+def _classify_image_safety(image: ImagePayload, config: OpenAIGuardrailConfig) -> GuardrailAssessment:
+    llm = build_openai_chat_model(
+        temperature=config.temperature,
+        model=config.model,
+        api_key=config.api_key,
+        max_tokens=config.max_tokens,
+    )
+    structured_llm = llm.with_structured_output(GuardrailAssessment)
+    response = structured_llm.invoke(
+        [
+            SystemMessage(content=GUARDRAIL_SYSTEM_PROMPT),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": _GUARDRAIL_USER_PROMPT},
+                    {"type": "image_url", "image_url": {"url": image.data_url}},
+                ]
+            ),
+        ]
     )
 
-    parsed = getattr(response, "parsed", None)
-    if isinstance(parsed, GuardrailAssessment):
-        return _normalize_guardrail_assessment(parsed)
-
-    if getattr(response, "text", None):
-        return _normalize_guardrail_assessment(
-            GuardrailAssessment.model_validate_json(response.text)
-        )
-
-    raise RuntimeError("Gemini guardrail returned no structured assessment.")
+    if isinstance(response, GuardrailAssessment):
+        return _normalize_guardrail_assessment(response)
+    if isinstance(response, dict):
+        return _normalize_guardrail_assessment(GuardrailAssessment.model_validate(response))
+    raise RuntimeError("OpenAI guardrail returned no structured assessment.")
 
 
 def _invoke_gemini_vlm(image: ImagePayload, config: GeminiConfig) -> str:
@@ -335,7 +348,7 @@ def _build_blocked_guardrail_result(reason: str, *, category: str) -> dict[str, 
 
 
 def image_guardrail_node(state: SkymirrorState) -> dict[str, Any]:
-    """Validate the image locally, then safety-classify it with Gemini."""
+    """Validate the image locally, then safety-classify it with OpenAI."""
     image_path = state.get("image_path")
     if not image_path:
         raise ValueError("image_guardrail_node requires state['image_path'].")
@@ -360,10 +373,10 @@ def image_guardrail_node(state: SkymirrorState) -> dict[str, Any]:
         }
 
     try:
-        config = _load_gemini_config()
+        config = _load_guardrail_config()
         assessment = _classify_image_safety(image, config)
     except Exception as exc:
-        logger.warning("image_guardrail: Gemini guardrail blocked frame - %s", exc)
+        logger.warning("image_guardrail: OpenAI guardrail blocked frame - %s", exc)
         result = _build_blocked_guardrail_result(
             f"Guardrail API failure: {exc}",
             category="guardrail_error",
@@ -372,11 +385,8 @@ def image_guardrail_node(state: SkymirrorState) -> dict[str, Any]:
             "guardrail_result": result,
             "metadata": {
                 "guardrail": {
-                    "provider": "gemini",
-                    "model": os.getenv(
-                        "GEMINI_GUARDRAIL_MODEL",
-                        _DEFAULT_GEMINI_GUARDRAIL_MODEL,
-                    ),
+                    "provider": "openai",
+                    "model": config.model,
                     "source": image.source,
                     "media_type": image.media_type,
                     "width": image.width,
@@ -404,8 +414,8 @@ def image_guardrail_node(state: SkymirrorState) -> dict[str, Any]:
         "guardrail_result": result,
         "metadata": {
             "guardrail": {
-                "provider": "gemini",
-                "model": config.guardrail_model,
+                "provider": "openai",
+                "model": config.model,
                 "source": image.source,
                 "media_type": image.media_type,
                 "width": image.width,

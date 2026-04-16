@@ -23,7 +23,7 @@ def test_order_expert_node_uses_retriever_and_model(monkeypatch) -> None:
         "_load_expert_model_config",
         lambda: {
             "api_key": "gemini-key",
-            "model": "gemini-3.1-pro-preview",
+            "model": "gemini-3-flash-preview",
             "temperature": 0.0,
             "max_tokens": 256,
             "top_k": 5,
@@ -66,7 +66,7 @@ def test_environment_expert_returns_empty_assessment_when_no_context(monkeypatch
         "_load_expert_model_config",
         lambda: {
             "api_key": "gemini-key",
-            "model": "gemini-3.1-pro-preview",
+            "model": "gemini-3-flash-preview",
             "temperature": 0.0,
             "max_tokens": 256,
             "top_k": 5,

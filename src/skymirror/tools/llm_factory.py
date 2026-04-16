@@ -1,7 +1,7 @@
 """LLM provider factory and safe narration helper.
 
-Shared between Alert Agent and Daily Explication Report. Select provider
-via the `LLM_PROVIDER` environment variable (default: anthropic).
+Shared between SKYMIRROR's non-VLM agents. By default these agents use
+OpenAI GPT-5.4 Mini unless an explicit provider override is set.
 """
 from __future__ import annotations
 
@@ -11,13 +11,42 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_LLM_PROVIDER = "openai"
+_DEFAULT_OPENAI_AGENT_MODEL = "gpt-5.4-mini"
+
+
+def get_openai_agent_model() -> str:
+    """Return the shared OpenAI model name for non-VLM agents."""
+    model = os.getenv("OPENAI_AGENT_MODEL", _DEFAULT_OPENAI_AGENT_MODEL).strip()
+    return model or _DEFAULT_OPENAI_AGENT_MODEL
+
+
+def build_openai_chat_model(
+    *,
+    temperature: float,
+    model: str | None = None,
+    api_key: str | None = None,
+    max_tokens: int | None = None,
+) -> Any:
+    """Construct a ChatOpenAI instance with shared defaults."""
+    from langchain_openai import ChatOpenAI
+
+    kwargs: dict[str, Any] = {
+        "model": (model or get_openai_agent_model()),
+        "temperature": temperature,
+    }
+    if api_key:
+        kwargs["api_key"] = api_key
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    return ChatOpenAI(**kwargs)
+
 
 def get_llm(temperature: float = 0.3) -> Any:
     """Return an instantiated LangChain chat model based on LLM_PROVIDER."""
-    provider = os.getenv("LLM_PROVIDER", "anthropic").lower()
+    provider = os.getenv("LLM_PROVIDER", _DEFAULT_LLM_PROVIDER).lower()
     if provider == "openai":
-        from langchain_openai import ChatOpenAI
-        return ChatOpenAI(model="gpt-4o", temperature=temperature)
+        return build_openai_chat_model(temperature=temperature)
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
         return ChatAnthropic(

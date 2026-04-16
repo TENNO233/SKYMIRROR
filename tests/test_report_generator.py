@@ -205,19 +205,22 @@ def test_select_cases_single_type_returns_top_severity(fixtures_dir: Path):
 # Task 11: LLM factory
 # ---------------------------------------------------------------------------
 
-def test_get_llm_default_is_anthropic(monkeypatch):
+def test_get_llm_default_is_openai(monkeypatch):
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy-key")
     from skymirror.tools.llm_factory import get_llm
     llm = get_llm()
-    assert type(llm).__name__ == "ChatAnthropic"
+    assert type(llm).__name__ == "ChatOpenAI"
 
 
 def test_get_llm_respects_openai_env(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy-key")
+    monkeypatch.setenv("OPENAI_AGENT_MODEL", "gpt-5.4-mini")
     from skymirror.tools.llm_factory import get_llm
     llm = get_llm()
     assert type(llm).__name__ == "ChatOpenAI"
+    assert llm.model_name == "gpt-5.4-mini"
 
 
 def test_get_llm_rejects_unknown_provider(monkeypatch):
