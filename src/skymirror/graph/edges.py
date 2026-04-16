@@ -1,6 +1,5 @@
 """
 edges.py — Conditional Routing Logic for SKYMIRROR
-==================================================
 The router performs coarse expert selection using normalized `validated_text`
 plus lightweight `validated_signals`. Fine-grained classification happens
 inside each expert node.
@@ -17,8 +16,17 @@ from skymirror.graph.state import SkymirrorState
 
 logger = logging.getLogger(__name__)
 
+# Union of keywords to ensure maximum recall before fine-grained expert evaluation
 ORDER_KEYWORDS: frozenset[str] = frozenset(
     {
+        "wrong way",
+        "illegal turn",
+        "red light",
+        "traffic violation",
+        "running light",
+        "lane change",
+        "overtaking",
+        "no entry",
         "illegal parking",
         "double parked",
         "lane obstruction",
@@ -36,10 +44,10 @@ ORDER_KEYWORDS: frozenset[str] = frozenset(
 
 SAFETY_KEYWORDS: frozenset[str] = frozenset(
     {
+        "accident",
         "collision",
         "suspected collision",
         "crash",
-        "accident",
         "wrong way",
         "against traffic",
         "dangerous crossing",
@@ -53,6 +61,18 @@ SAFETY_KEYWORDS: frozenset[str] = frozenset(
 
 ENVIRONMENT_KEYWORDS: frozenset[str] = frozenset(
     {
+        "smoke",
+        "fire",
+        "flood",
+        "waterlogged",
+        "ice",
+        "fog",
+        "dust",
+        "visibility",
+        "low visibility",
+        "pothole",
+        "road damage",
+        "oil spill",
         "flooding",
         "standing water",
         "construction",
@@ -60,12 +80,9 @@ ENVIRONMENT_KEYWORDS: frozenset[str] = frozenset(
         "obstacle",
         "debris",
         "fallen tree",
-        "low visibility",
         "poor visibility",
         "glare",
         "poor lighting",
-        "smoke",
-        "fog",
     }
 )
 
@@ -93,6 +110,27 @@ _EXPERT_SIGNAL_FIELDS: dict[str, tuple[str, ...]] = {
 }
 
 _FALLBACK_NODE: str = "alert_manager"
+_GUARDRAIL_BLOCKED_NODE = "end_pipeline"
+
+
+def route_after_guardrail(state: SkymirrorState) -> Union[list[Send], str]:
+    """Route safe frames to both VLMs, and fail closed otherwise."""
+    guardrail_result = state.get("guardrail_result", {})
+    allowed = bool(guardrail_result.get("allowed", False))
+
+    if not allowed:
+        logger.info(
+            "route_after_guardrail: Blocking frame before VLMs - status=%s reason=%s",
+            guardrail_result.get("status", "missing"),
+            guardrail_result.get("reason", "missing guardrail result"),
+        )
+        return _GUARDRAIL_BLOCKED_NODE
+
+    logger.info("route_after_guardrail: Guardrail passed; fan-out to Gemini and Qwen.")
+    return [
+        Send("gemini_vlm", state),
+        Send("qwen_vlm", state),
+    ]
 
 
 def _signal_activates_expert(expert_node: str, signals: dict[str, object]) -> bool:
@@ -131,6 +169,8 @@ def route_to_experts(
 
     text_lower = validated_text.lower()
     active_experts: list[str] = []
+    
+    # Hybrid Check: Route if either the text mentions a keyword OR the signals are triggered
     for keywords, expert_node in _EXPERT_ROUTING:
         if any(keyword in text_lower for keyword in keywords) or _signal_activates_expert(
             expert_node,
