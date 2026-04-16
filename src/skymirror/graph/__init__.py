@@ -1,17 +1,21 @@
 """
-Graph module.
+Graph package exports.
 
-Public surface:
-    - `app`   : compiled LangGraph `CompiledGraph` ready for `.invoke()` / `.astream()`
-    - `SkymirrorState` : the shared TypedDict used across all nodes
+`app` is imported lazily so modules that only need state types do not require
+LangGraph to be imported at package-import time.
 """
+
+from __future__ import annotations
+
+from typing import Any
 
 from skymirror.graph.state import SkymirrorState
 
 __all__ = ["app", "SkymirrorState"]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
+    """Lazily expose the compiled LangGraph application."""
     if name == "app":
         from skymirror.graph.graph import app
 

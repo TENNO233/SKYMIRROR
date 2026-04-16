@@ -148,7 +148,6 @@ def _build_expert_prompt(spec: ExpertSpec, validated_text: str, documents: list[
         "Only cite retrieved documents. If the retrieved context does not support a claim, do not make it."
     )
 
-
 def _invoke_expert_llm(spec: ExpertSpec, validated_text: str, documents: list[Document]) -> ExpertAssessment:
     config = _load_expert_model_config()
     llm = build_openai_chat_model(
