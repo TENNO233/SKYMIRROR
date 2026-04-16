@@ -1,5 +1,6 @@
 """
-graph.py - LangGraph pipeline definition for SKYMIRROR.
+graph.py — LangGraph Pipeline Definition for SKYMIRROR
+Builds the runnable LangGraph application.
 """
 
 from __future__ import annotations
