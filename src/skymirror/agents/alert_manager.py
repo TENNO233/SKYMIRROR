@@ -1,76 +1,101 @@
 """
-alert_manager.py — Alert Generation & Dispatch Agent
-======================================================
-Responsibility: Consume the aggregated `expert_results` and produce a
-structured list of alerts stored in `state["alerts"]`.  Optionally dispatch
-alerts to external systems (webhook, message queue, monitoring platform).
-
-Implementation notes (TODO)
----------------------------
-- Input:  `state["expert_results"]`  (merged dict from all active experts)
-- Output: `state["alerts"]`          (list of alert dicts)
-- Alert schema (suggested):
-    {
-        "severity":      "low" | "medium" | "high" | "critical",
-        "type":          "traffic_violation" | "safety_incident" | "env_hazard",
-        "message":       str,
-        "source_expert": str,
-        "timestamp":     ISO-8601 str,
-        "image_path":    str,
-    }
-- Dispatch options: HTTP webhook (httpx), Kafka topic, SNS, or a DB write.
-- Idempotency: use `image_path` + expert name as a deduplication key.
+alert_manager.py — Alert Generation & Optional Dispatch
+=======================================================
+Consumes structured expert results and turns matched scenarios into alert
+records. Dispatch is optional and only attempted when `ALERT_WEBHOOK_URL`
+is configured.
 """
 
 from __future__ import annotations
 
 import logging
+import os
+from datetime import datetime, timezone
 from typing import Any
 
-from skymirror.graph.state import SkymirrorState
+from skymirror.graph.state import ExpertResult, ExpertScenario, SkymirrorState
 
 logger = logging.getLogger(__name__)
 
 
+def _iso_now() -> str:
+    """Return the current UTC timestamp as an ISO-8601 string."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _build_alert(
+    *,
+    expert_name: str,
+    result: ExpertResult,
+    scenario: ExpertScenario,
+    image_path: str,
+) -> dict[str, Any]:
+    """Convert one scenario into an alert record."""
+    return {
+        "severity": scenario["severity"],
+        "type": scenario["name"],
+        "category": result["category"],
+        "message": scenario["reason"],
+        "source_expert": expert_name,
+        "timestamp": _iso_now(),
+        "image_path": image_path,
+        "urgent": result["urgent"],
+        "summary": result["summary"],
+        "recommended_actions": scenario["recommended_actions"],
+        "evidence": scenario["evidence"],
+        "impact_scope": scenario["impact_scope"],
+        "persistence": scenario["persistence"],
+        "confidence": scenario["confidence"],
+    }
+
+
+def _dispatch_alerts(alerts: list[dict[str, Any]]) -> None:
+    """Send alerts to an optional webhook destination."""
+    webhook_url = os.getenv("ALERT_WEBHOOK_URL")
+    if not webhook_url or not alerts:
+        return
+
+    try:
+        import httpx
+
+        response = httpx.post(webhook_url, json=alerts, timeout=5.0)
+        response.raise_for_status()
+        logger.info("alert_manager: Dispatched %d alert(s) to webhook.", len(alerts))
+    except Exception as exc:
+        logger.warning("alert_manager: Failed to dispatch alerts — %s", exc)
+
+
 def alert_manager_node(state: SkymirrorState) -> dict[str, Any]:
     """
-    LangGraph node function for the Alert Manager.
+    Transform expert results into alert records and optionally dispatch them.
 
     Args:
-        state: Fully or partially populated pipeline state.
-               `state["expert_results"]` contains all expert findings.
+        state: Pipeline state containing merged `expert_results`.
 
     Returns:
-        Partial state dict with `alerts` list populated.
+        Partial state dict with `alerts` populated.
     """
-    expert_results: dict[str, Any] = state.get("expert_results", {})
+    expert_results: dict[str, ExpertResult] = state.get("expert_results", {})
+    image_path = state.get("image_path", "")
     logger.info(
         "alert_manager: Processing results from %d expert(s): %s",
         len(expert_results),
         list(expert_results.keys()),
     )
 
-    # TODO: Implement alert synthesis and dispatch.
-    # Example skeleton:
-    #
-    # import datetime, httpx, os
-    # alerts = []
-    # for expert_name, findings in expert_results.items():
-    #     for finding in findings.get("findings", []):
-    #         alert = {
-    #             "severity": findings.get("severity", "low"),
-    #             "type": _EXPERT_TO_TYPE[expert_name],
-    #             "message": finding,
-    #             "source_expert": expert_name,
-    #             "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-    #             "image_path": state.get("image_path", ""),
-    #         }
-    #         alerts.append(alert)
-    #
-    # webhook_url = os.getenv("ALERT_WEBHOOK_URL")
-    # if webhook_url and alerts:
-    #     httpx.post(webhook_url, json=alerts, timeout=5.0)
-    #
-    # return {"alerts": alerts}
+    alerts: list[dict[str, Any]] = []
+    for expert_name, result in expert_results.items():
+        if not result.get("matched"):
+            continue
+        for scenario in result.get("scenarios", []):
+            alerts.append(
+                _build_alert(
+                    expert_name=expert_name,
+                    result=result,
+                    scenario=scenario,
+                    image_path=image_path,
+                )
+            )
 
-    raise NotImplementedError("alert_manager_node is not yet implemented.")
+    _dispatch_alerts(alerts)
+    return {"alerts": alerts}
