@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Union
 
+from langgraph.graph import END
 from langgraph.types import Send
 
 from skymirror.graph.state import SkymirrorState
@@ -188,3 +189,54 @@ def route_to_experts(
     logger.info("route_to_experts: Activated experts → %s", active_experts)
     state_with_experts: SkymirrorState = {**state, "active_experts": active_experts}  # type: ignore[misc]
     return [Send(expert, state_with_experts) for expert in active_experts]
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator → next node(s)
+# ---------------------------------------------------------------------------
+
+_ORCHESTRATOR_EXPERT_NODES: frozenset[str] = frozenset(
+    {"order_expert", "safety_expert", "environment_expert"}
+)
+
+
+def route_from_orchestrator(
+    state: SkymirrorState,
+) -> Union[list[Send], str]:
+    """
+    Route based on the orchestrator's ``next_nodes`` decision.
+
+    Dispatch pass (experts selected):
+        Returns ``list[Send]`` so experts run in parallel. Each Send
+        carries the full current state so experts can read validated_text.
+
+    Evaluate pass — alert needed:
+        Returns ``"alert_manager"`` to trigger the alert synthesis node.
+
+    Evaluate pass — no action needed:
+        Returns ``END`` to terminate the pipeline cleanly.
+
+    Args:
+        state: Current pipeline state after orchestrator_node has written
+            ``next_nodes``.
+
+    Returns:
+        A list of Send objects, the string ``"alert_manager"``, or ``END``.
+    """
+    next_nodes: list[str] = state.get("next_nodes", [])
+
+    experts_to_run = [n for n in next_nodes if n in _ORCHESTRATOR_EXPERT_NODES]
+    if experts_to_run:
+        logger.info(
+            "route_from_orchestrator: Fanning out to %d expert(s): %s",
+            len(experts_to_run),
+            experts_to_run,
+        )
+        return [Send(expert, state) for expert in experts_to_run]
+
+    if "alert_manager" in next_nodes:
+        logger.info("route_from_orchestrator: Routing to alert_manager.")
+        return "alert_manager"
+
+    logger.info("route_from_orchestrator: FINISH — no alert needed.")
+    return END

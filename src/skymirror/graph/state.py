@@ -134,7 +134,13 @@ class SkymirrorState(TypedDict, total=False):
     history_context: list[HistoryFrame]
 
     # --- Orchestration -------------------------------------------------------
+    # active_experts: experts selected in the current dispatch pass.
     active_experts: list[str]
+    # next_nodes: routing decision emitted by orchestrator_node each pass.
+    #   Pass 1 (dispatch):  list of expert node names, e.g. ["order_expert"]
+    #   Pass 2 (evaluate):  ["alert_manager"] or ["FINISH"]
+    # No reducer — last write wins (only orchestrator_node ever writes this).
+    next_nodes: list[str]
 
     # --- Expert Analysis (parallel-safe via reducers) ------------------------
     expert_results: Annotated[dict[str, Any], _merge_dicts]
