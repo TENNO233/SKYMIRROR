@@ -1,43 +1,39 @@
 """
-state.py — Global State Definition for SKYMIRROR
-=================================================
-`SkymirrorState` is the single source of truth passed between every node in
-the LangGraph pipeline. LangGraph merges partial dicts returned by each node
-into this shared state object.
-
-Reducer annotations on mutable fields (`expert_results`, `alerts`) allow safe
-parallel fan-out to multiple expert nodes: each expert writes its own key/items
-and LangGraph merges the results before handing control to the alert manager.
+state.py - Global state definition for SKYMIRROR.
 """
 
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Any, Literal, Optional, TypedDict
+from typing import Annotated, Any, Literal
 
+from typing_extensions import TypedDict
 
-# ---------------------------------------------------------------------------
-# Custom Reducers
-# ---------------------------------------------------------------------------
 
 def _merge_dicts(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
-    """
-    Merge partial dictionaries returned by parallel LangGraph branches.
-
-    Args:
-        a: Accumulated results so far.
-        b: New partial results from the current node.
-
-    Returns:
-        A merged mapping containing both dictionaries.
-    """
+    """Merge two flat dictionaries."""
     return {**a, **b}
+
+
+def _deep_merge_dicts(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge nested dictionaries."""
+    merged: dict[str, Any] = dict(a)
+
+    for key, value in b.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_dicts(existing, value)
+        else:
+            merged[key] = value
+
+    return merged
 
 
 # ---------------------------------------------------------------------------
 # Shared Schemas
 # ---------------------------------------------------------------------------
 
+WorkflowMode = Literal["frame", "report"]
 SeverityLevel = Literal["low", "medium", "high", "critical"]
 ConfidenceLevel = Literal["low", "medium", "high"]
 ImpactScope = Literal["local", "single_lane", "multi_lane", "intersection"]
@@ -76,7 +72,7 @@ class ExpertScenario(TypedDict):
     recommended_actions: list[str]
 
 
-class ExpertResult(TypedDict):
+class ExpertResult(TypedDict, total=False):
     """Structured output emitted by one expert agent."""
 
     matched: bool
@@ -84,15 +80,17 @@ class ExpertResult(TypedDict):
     summary: str
     urgent: bool
     scenarios: list[ExpertScenario]
+    citations: list[dict[str, Any]]
 
 
 class HistoryFrame(TypedDict, total=False):
     """Snapshot of a previous frame used for short-term temporal reasoning."""
 
     image_path: str
+    validated_scene: dict[str, Any]
     validated_text: str
     validated_signals: ValidatedSignals
-    expert_results: dict[str, ExpertResult]
+    expert_results: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
@@ -105,53 +103,65 @@ class SkymirrorState(TypedDict, total=False):
 
     Fields
     ------
+    workflow_mode:
+        Top-level route selector. `"frame"` runs the traffic-frame pipeline and
+        `"report"` runs the daily report generator path.
     image_path:
-        Absolute path (or URI) of the traffic camera frame being processed.
-
-    vlm_text:
-        Raw textual description produced by the VLM agent from the image.
-
+        Absolute path or URI of the traffic camera frame being processed.
+    target_date / oa_log_dir / output_dir / report_path:
+        Inputs and outputs used by the daily report generator path.
+    guardrail_result:
+        Result of the image safety gate before the VLM is invoked.
+    vlm_output:
+        Structured scene report emitted by the single VLM pass.
+    validated_scene:
+        Canonical JSON emitted by the validator after cross-checking the VLM
+        report against the image.
     validated_text:
-        Refined, normalized description used by downstream routing and experts.
-
+        Canonical normalized text derived from `validated_scene`.
     validated_signals:
-        Lightweight structured cues extracted from `validated_text`.
-
+        Lightweight structured cues extracted by the validator for downstream
+        orchestration and expert routing.
     history_context:
         Short-term in-memory history for the same camera. Used by experts to
         infer persistence and simple temporal patterns such as repeated queueing.
-
     active_experts:
-        List of expert node names selected by the orchestrator.
-
+        Expert node names selected by the expert router.
     expert_results:
-        Aggregated findings from activated expert agents. Each expert writes
+        Aggregated downstream expert findings. Each expert writes
         under its own key and the reducer merges them safely.
-
     alerts:
         Structured alert objects generated by the alert manager.
-
     metadata:
-        Optional runtime diagnostics bag.
+        Diagnostics and per-stage runtime details.
     """
 
-    # --- Ingestion -----------------------------------------------------------
+    workflow_mode: WorkflowMode
+    run_id: str
+    camera_id: str
     image_path: str
-
-    # --- Vision → Language ---------------------------------------------------
-    vlm_text: str
-
-    # --- Validation ----------------------------------------------------------
+    target_date: str
+    oa_log_dir: str
+    output_dir: str
+    report_path: str
+    policy_snapshot: dict[str, Any]
+    guardrail_result: dict[str, Any]
+    vlm_output: dict[str, Any]
+    validated_scene: dict[str, Any]
     validated_text: str
     validated_signals: ValidatedSignals
     history_context: list[HistoryFrame]
 
     # --- Orchestration -------------------------------------------------------
+    # active_experts: experts selected in the current dispatch pass.
     active_experts: list[str]
+    # next_nodes: routing decision emitted by orchestrator_node each pass.
+    #   Pass 1 (dispatch):  list of expert node names, e.g. ["order_expert"]
+    #   Pass 2 (evaluate):  ["alert_manager"] or ["FINISH"]
+    # No reducer — last write wins (only orchestrator_node ever writes this).
+    next_nodes: list[str]
 
     # --- Expert Analysis (parallel-safe via reducers) ------------------------
-    expert_results: Annotated[dict[str, ExpertResult], _merge_dicts]
+    expert_results: Annotated[dict[str, Any], _merge_dicts]
     alerts: Annotated[list[dict[str, Any]], operator.add]
-
-    # --- Diagnostics (optional) ----------------------------------------------
-    metadata: Optional[dict[str, Any]]
+    metadata: Annotated[dict[str, Any], _deep_merge_dicts]

@@ -1,0 +1,146 @@
+name: Security Scan – LLMSecOps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly Monday 02:00 UTC – catch newly-disclosed CVEs
+    - cron: "0 2 * * 1"
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # 1. Secrets Detection – block API keys / tokens from landing in the repo
+  # ─────────────────────────────────────────────────────────────────────────
+  secrets-scan:
+    name: Secrets Detection (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so gitleaks can scan all commits
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 2. Dependency Vulnerability Audit – supply-chain security
+  # ─────────────────────────────────────────────────────────────────────────
+  dependency-audit:
+    name: Dependency Audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package and pip-audit
+        run: |
+          pip install --quiet -e ".[dev]"
+          pip install --quiet pip-audit
+
+      - name: Audit installed packages for known CVEs
+        run: pip-audit --strict
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 3. SAST – static code security analysis
+  # ─────────────────────────────────────────────────────────────────────────
+  sast:
+    name: SAST (bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install bandit
+        run: pip install --quiet bandit[toml]
+
+      - name: Run bandit
+        # Severity HIGH+, skip test files (assertions expected there)
+        run: |
+          bandit -r src/ scripts/ \
+            --severity-level high \
+            --confidence-level high \
+            --format json \
+            --output bandit_report.json || true
+          python - <<'EOF'
+          import json, sys
+          with open("bandit_report.json") as f:
+              report = json.load(f)
+          highs = [
+              issue for issue in report.get("results", [])
+              if issue.get("issue_severity") == "HIGH"
+              and issue.get("issue_confidence") == "HIGH"
+          ]
+          if highs:
+              for issue in highs:
+                  print(f"HIGH: {issue['issue_text']} — {issue['filename']}:{issue['line_number']}")
+              sys.exit(1)
+          print(f"SAST passed. {len(report.get('results', []))} issues, 0 HIGH+HIGH.")
+          EOF
+
+      - name: Upload SAST report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-report
+          path: bandit_report.json
+          retention-days: 30
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 4. LLM-specific: Prompt Injection Defense Tests
+  # Verifies structural guards without live LLM calls
+  # ─────────────────────────────────────────────────────────────────────────
+  prompt-injection-tests:
+    name: Prompt Injection Defense Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package
+        run: pip install --quiet -e ".[dev]"
+
+      - name: Run prompt injection defense tests
+        env:
+          OPENAI_API_KEY: "sk-test-00000000000000000000000000000000"
+          PINECONE_API_KEY: "pcsk_test_000000"
+          PINECONE_INDEX_NAME: "skymirror-rag"
+          PINECONE_INDEX_HOST: "https://skymirror-rag.svc.pinecone.io"
+        run: |
+          pytest tests/test_prompt_injection.py -v --tb=short
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 5. Container Image Scan (only on push to main when Dockerfile exists)
+  # ─────────────────────────────────────────────────────────────────────────
+  container-scan:
+    name: Container Image Scan (trivy)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image for scanning
+        run: docker build -t skymirror:scan .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "skymirror:scan"
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: "CRITICAL,HIGH"

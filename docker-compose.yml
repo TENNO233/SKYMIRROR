@@ -1,0 +1,80 @@
+version: "3.9"
+
+# =============================================================================
+# SKYMIRROR – Local Development / Staging Stack
+# MLSecOps: secrets via env_file only (never baked into image)
+# =============================================================================
+
+x-common: &common
+  image: skymirror:latest
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: runtime
+  env_file:
+    - .env
+  restart: unless-stopped
+  networks:
+    - skymirror-net
+
+services:
+
+  # ── Camera Analysis Daemon ──────────────────────────────────────────────────
+  daemon:
+    <<: *common
+    container_name: skymirror-daemon
+    command: ["python", "-m", "skymirror.main"]
+    volumes:
+      # Persist audit logs, reports, alerts, and captured frames
+      - oa-log:/app/data/oa_log
+      - reports:/app/data/reports
+      - alerts:/app/data/alerts
+      - frames:/app/data/frames
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "from skymirror.tools.governance import load_policy; load_policy()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Monitoring Dashboard ────────────────────────────────────────────────────
+  dashboard:
+    <<: *common
+    container_name: skymirror-dashboard
+    command: ["python", "-m", "skymirror.dashboard.server"]
+    ports:
+      - "8000:8000"
+    volumes:
+      # Read-only access to audit data; dashboard must not write oa_log directly
+      - oa-log:/app/data/oa_log:ro
+      - reports:/app/data/reports:ro
+      - alerts:/app/data/alerts:ro
+      - dashboard-state:/app/data/dashboard
+    depends_on:
+      daemon:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/dashboard')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  oa-log:
+    name: skymirror-oa-log
+  reports:
+    name: skymirror-reports
+  alerts:
+    name: skymirror-alerts
+  frames:
+    name: skymirror-frames
+  dashboard-state:
+    name: skymirror-dashboard-state
+
+networks:
+  skymirror-net:
+    name: skymirror-network
+    driver: bridge
