@@ -11,11 +11,10 @@ import time
 from typing import Any, Optional
 
 from langchain_core.documents import Document
-from langchain_core.embeddings import Embeddings
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_GEMINI_EMBEDDING_MODEL = "gemini-embedding-001"
+_DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 _DEFAULT_RAG_TOP_K = 5
 _DEFAULT_PINECONE_CLOUD = "aws"
 _DEFAULT_PINECONE_REGION = "us-east-1"
@@ -51,52 +50,6 @@ def _read_int_env(name: str, default: int) -> int:
 def _read_optional_env(name: str, default: str) -> str:
     value = os.getenv(name, "").strip()
     return value or default
-
-
-class GeminiEmbeddings(Embeddings):
-    """LangChain embeddings wrapper backed by Gemini embeddings."""
-
-    def __init__(self, api_key: str, model: str) -> None:
-        self.api_key = api_key
-        self.model = model
-
-    def _client(self):
-        from google import genai
-
-        return genai.Client(api_key=self.api_key)
-
-    @staticmethod
-    def _extract_vectors(response: Any) -> list[list[float]]:
-        if getattr(response, "embeddings", None):
-            return [list(item.values) for item in response.embeddings]
-
-        if getattr(response, "embedding", None):
-            return [list(response.embedding.values)]
-
-        raise RuntimeError("Gemini embedding response did not contain embeddings.")
-
-    def _embed_batch(self, texts: list[str], task_type: str) -> list[list[float]]:
-        if not texts:
-            return []
-
-        from google.genai import types
-
-        response = self._client().models.embed_content(
-            model=self.model,
-            contents=texts,
-            config=types.EmbedContentConfig(task_type=task_type),
-        )
-        vectors = self._extract_vectors(response)
-        if len(vectors) != len(texts):
-            raise RuntimeError("Gemini embedding count did not match input text count.")
-        return vectors
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return self._embed_batch(texts, task_type="RETRIEVAL_DOCUMENT")
-
-    def embed_query(self, text: str) -> list[float]:
-        vectors = self._embed_batch([text], task_type="RETRIEVAL_QUERY")
-        return vectors[0]
 
 
 def _init_pinecone() -> None:
@@ -145,11 +98,17 @@ def _get_index_description() -> Any:
     return _index_description
 
 
-def _get_embeddings(model: Optional[str] = None) -> GeminiEmbeddings:
-    return GeminiEmbeddings(
-        api_key=_read_required_env("GEMINI_API_KEY"),
-        model=(model or os.getenv("GEMINI_EMBEDDING_MODEL", _DEFAULT_GEMINI_EMBEDDING_MODEL).strip())
-        or _DEFAULT_GEMINI_EMBEDDING_MODEL,
+def _get_embeddings(model: Optional[str] = None) -> Any:
+    from langchain_openai import OpenAIEmbeddings
+
+    resolved_model = (
+        model
+        or os.getenv("OPENAI_EMBEDDING_MODEL", _DEFAULT_OPENAI_EMBEDDING_MODEL).strip()
+        or _DEFAULT_OPENAI_EMBEDDING_MODEL
+    )
+    return OpenAIEmbeddings(
+        api_key=_read_required_env("OPENAI_API_KEY"),
+        model=resolved_model,
     )
 
 

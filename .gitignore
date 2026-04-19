@@ -52,6 +52,12 @@ data/frames/*
 data/logs/*
 !data/logs/.gitkeep
 
+# Dashboard runtime state and logs
+data/dashboard/
+
+# Generated alert payloads and dispatch logs
+data/alerts/
+
 # Generated PDF / HTML reports
 data/reports/*
 !data/reports/.gitkeep

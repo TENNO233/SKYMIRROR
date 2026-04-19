@@ -1,13 +1,14 @@
 """
 main.py — SKYMIRROR Application Entry Point
 =============================================
-Long-running daemon that polls a Singapore LTA traffic camera every
+Long-running daemon that polls one or more Singapore LTA traffic cameras every
 PROCESSING_INTERVAL_SECONDS, feeds each frame through the LangGraph pipeline,
 and logs the resulting alerts.
 
 Execution modes
 ---------------
-    # Normal daemon (reads TARGET_CAMERA_ID from env, default "4798"):
+    # Normal daemon (reads TARGET_CAMERA_IDS, or falls back to the first two
+    # cameras in the dashboard reference file):
     python -m skymirror.main
 
     # Single-shot with a local image (skips camera fetch, useful for testing):
@@ -42,10 +43,12 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+import json
 import logging
 import os
 import signal
 import sys
+from threading import Thread
 import time
 from pathlib import Path
 from typing import Any
@@ -53,6 +56,11 @@ from typing import Any
 from dotenv import load_dotenv
 from langsmith import traceable
 
+from skymirror.tools.dashboard_status import (
+    clear_runtime_active_cameras,
+    set_runtime_active_cameras,
+    write_camera_runtime_status,
+)
 from skymirror.tools.langsmith_utils import flush_langsmith_traces
 
 # Load .env FIRST — before any module that reads os.environ
@@ -60,6 +68,8 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 _HISTORY_WINDOW_SIZE: int = 5
+_DEFAULT_DASHBOARD_STATUS_PATH = "data/dashboard/live_status.json"
+_DEFAULT_CAMERA_REFERENCE_PATH = "data/sources/traffic_camera_reference.json"
 
 # ---------------------------------------------------------------------------
 # Shutdown flag — set by signal handlers, checked in the main loop
@@ -86,6 +96,11 @@ def _configure_logging() -> None:
     In production (LOG_LEVEL=INFO or above) emits one-line records.
     Set LOG_LEVEL=DEBUG for verbose per-request tracing.
     """
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
     log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_str, logging.INFO)
 
@@ -101,6 +116,76 @@ def _configure_logging() -> None:
     logging.getLogger("requests").setLevel(logging.WARNING)
 
 
+def _publish_dashboard_status(
+    *,
+    status_path: Path,
+    camera_id: str,
+    backend_status: str,
+    interval_seconds: int,
+    image_path: str = "",
+    final_state: dict[str, Any] | None = None,
+    message: str = "",
+) -> None:
+    try:
+        write_camera_runtime_status(
+            status_path=status_path,
+            camera_id=camera_id,
+            backend_status=backend_status,
+            interval_seconds=interval_seconds,
+            image_path=image_path,
+            final_state=final_state,
+            message=message,
+        )
+    except Exception as exc:
+        logger.warning("Dashboard status update failed for camera %s: %s", camera_id, exc)
+
+
+def _load_default_camera_ids(limit: int = 2) -> list[str]:
+    reference_path = Path(_DEFAULT_CAMERA_REFERENCE_PATH)
+    if not reference_path.is_file():
+        return []
+
+    try:
+        rows = json.loads(reference_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Could not read camera reference file %s: %s", reference_path, exc)
+        return []
+
+    camera_ids: list[str] = []
+    for row in rows:
+        camera_id = str(row.get("camera_id", "")).strip()
+        if camera_id and camera_id not in camera_ids:
+            camera_ids.append(camera_id)
+        if len(camera_ids) >= limit:
+            break
+    return camera_ids
+
+
+def _parse_camera_ids(raw_value: str) -> list[str]:
+    camera_ids: list[str] = []
+    for part in raw_value.split(","):
+        camera_id = part.strip()
+        if camera_id and camera_id not in camera_ids:
+            camera_ids.append(camera_id)
+    return camera_ids
+
+
+def _resolve_target_camera_ids() -> list[str]:
+    raw_ids = os.getenv("TARGET_CAMERA_IDS", "").strip()
+    if raw_ids:
+        return _parse_camera_ids(raw_ids)
+
+    default_ids = _load_default_camera_ids(limit=2)
+    if default_ids:
+        return default_ids
+
+    explicit_single = os.getenv("TARGET_CAMERA_ID", "").strip()
+    if explicit_single:
+        return [explicit_single]
+
+    return ["4798"]
+
+
 # ---------------------------------------------------------------------------
 # Pipeline runner (single iteration)
 # ---------------------------------------------------------------------------
@@ -109,6 +194,7 @@ def _build_history_entry(final_state: dict[str, Any]) -> dict[str, Any]:
     """Persist only the fields needed by downstream temporal reasoning."""
     return {
         "image_path": final_state.get("image_path", ""),
+        "validated_scene": final_state.get("validated_scene", {}),
         "validated_text": final_state.get("validated_text", ""),
         "validated_signals": final_state.get("validated_signals", {}),
         "expert_results": final_state.get("expert_results", {}),
@@ -118,6 +204,7 @@ def _build_history_entry(final_state: dict[str, Any]) -> dict[str, Any]:
 def _trace_run_pipeline_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
     history_context = inputs.get("history_context") or []
     return {
+        "workflow_mode": str(inputs.get("workflow_mode", "frame")),
         "image_path": str(inputs.get("image_path", "")),
         "history_count": len(history_context),
     }
@@ -147,6 +234,10 @@ def _run_pipeline(
     image_path: str,
     app: Any,
     history_context: list[dict[str, Any]] | None = None,
+    *,
+    camera_id: str,
+    status_path: Path,
+    interval_seconds: int,
 ) -> dict[str, Any] | None:
     """
     Invoke the LangGraph pipeline for one camera frame and log the results.
@@ -159,14 +250,21 @@ def _run_pipeline(
     logger.info("Pipeline start — image: %s", image_path)
 
     initial_state = {
+        "workflow_mode": "frame",
         "image_path": image_path,
+        "target_date": "",
+        "oa_log_dir": "",
+        "output_dir": "",
+        "report_path": "",
         # Remaining fields start empty; each node populates its own slice
         "guardrail_result": {},
-        "vlm_outputs": {},
+        "vlm_output": {},
+        "validated_scene": {},
         "validated_text": "",
         "validated_signals": {},
         "history_context": history_context or [],
         "active_experts": [],
+        "next_nodes": [],
         "expert_results": {},
         "alerts": [],
         "metadata": {},
@@ -177,14 +275,32 @@ def _run_pipeline(
     except Exception as exc:
         # Pipeline errors must NOT crash the daemon — log and continue
         logger.error("Pipeline raised an unhandled exception: %s", exc, exc_info=True)
+        _publish_dashboard_status(
+            status_path=status_path,
+            camera_id=camera_id,
+            backend_status="error",
+            interval_seconds=interval_seconds,
+            image_path=image_path,
+            message=f"Pipeline error: {exc}",
+        )
         return None
 
     guardrail_result: dict[str, Any] = final_state.get("guardrail_result", {})
     if guardrail_result and not guardrail_result.get("allowed", False):
+        reason = guardrail_result.get("reason", "no reason provided")
         logger.info(
             "Pipeline complete - frame blocked by guardrail (%s): %s",
             guardrail_result.get("status", "blocked"),
-            guardrail_result.get("reason", "no reason provided"),
+            reason,
+        )
+        _publish_dashboard_status(
+            status_path=status_path,
+            camera_id=camera_id,
+            backend_status="blocked",
+            interval_seconds=interval_seconds,
+            image_path=image_path,
+            final_state=final_state,
+            message=str(reason),
         )
         return
 
@@ -202,6 +318,20 @@ def _run_pipeline(
     else:
         logger.info("Pipeline complete — no alerts generated for this frame.")
 
+    _publish_dashboard_status(
+        status_path=status_path,
+        camera_id=camera_id,
+        backend_status="alerting" if alerts else "monitoring",
+        interval_seconds=interval_seconds,
+        image_path=image_path,
+        final_state=final_state,
+        message=(
+            str(alerts[0].get("message", "")).strip()
+            if alerts
+            else "Frame processed successfully."
+        ),
+    )
+
     return final_state
 
 
@@ -215,6 +345,7 @@ def _run_daemon(
     frames_dir: Path,
     interval: int,
     keep_history: bool,
+    status_path: Path,
 ) -> None:
     """
     Main polling loop.  Runs until SIGINT / SIGTERM is received.
@@ -225,10 +356,11 @@ def _run_daemon(
         frames_dir:   Directory where fetched frames are stored.
         interval:     Seconds to sleep between iterations.
         keep_history: Whether to retain timestamped historical frames.
+        status_path:  JSON snapshot file consumed by the dashboard backend.
     """
     # Import here (not at module level) so that the heavy LangGraph/model
     # initialisation only happens when the daemon actually starts.
-    from skymirror.tools.camera_fetcher import fetch_latest_frame
+    from skymirror.tools.camera_fetcher import fetch_latest_frame, publish_latest_frame
 
     logger.info(
         "Daemon started — camera=%s | interval=%ds | frames_dir=%s",
@@ -239,12 +371,26 @@ def _run_daemon(
 
     iteration = 0
     camera_history: deque[dict[str, Any]] = deque(maxlen=_HISTORY_WINDOW_SIZE)
+    _publish_dashboard_status(
+        status_path=status_path,
+        camera_id=camera_id,
+        backend_status="starting",
+        interval_seconds=interval,
+        message="Daemon online. Awaiting first camera fetch.",
+    )
 
     while not _shutdown_requested:
         iteration += 1
         logger.info("─── Iteration %d ───────────────────────────────", iteration)
 
         # 1. Fetch the latest camera frame
+        _publish_dashboard_status(
+            status_path=status_path,
+            camera_id=camera_id,
+            backend_status="fetching",
+            interval_seconds=interval,
+            message="Polling camera feed for the latest frame.",
+        )
         image_path = fetch_latest_frame(
             camera_id=camera_id,
             save_dir=frames_dir,
@@ -256,14 +402,33 @@ def _run_daemon(
                 "Camera fetch failed for camera %s — skipping pipeline this cycle.",
                 camera_id,
             )
+            _publish_dashboard_status(
+                status_path=status_path,
+                camera_id=camera_id,
+                backend_status="fetch_error",
+                interval_seconds=interval,
+                message="Latest frame could not be fetched from the camera feed.",
+            )
         else:
             # 2. Run the LangGraph pipeline
+            _publish_dashboard_status(
+                status_path=status_path,
+                camera_id=camera_id,
+                backend_status="processing",
+                interval_seconds=interval,
+                image_path=image_path,
+                message="Frame fetched. Running guardrail and pipeline analysis.",
+            )
             final_state = _run_pipeline(
                 image_path,
                 app,
                 history_context=list(camera_history),
+                camera_id=camera_id,
+                status_path=status_path,
+                interval_seconds=interval,
             )
             if final_state is not None:
+                publish_latest_frame(camera_id, frames_dir, image_path)
                 camera_history.append(_build_history_entry(final_state))
 
         # 3. Sleep until next cycle, checking shutdown flag every second
@@ -273,23 +438,92 @@ def _run_daemon(
                 break
             time.sleep(1)
 
+    _publish_dashboard_status(
+        status_path=status_path,
+        camera_id=camera_id,
+        backend_status="offline",
+        interval_seconds=interval,
+        message="Daemon stopped.",
+    )
     logger.info("Daemon loop exited cleanly after %d iteration(s).", iteration)
 
 
-def _run_single_shot(app: Any, image_path: str) -> None:
+def _run_multi_camera_daemon(
+    *,
+    app: Any,
+    camera_ids: list[str],
+    frames_dir: Path,
+    interval: int,
+    keep_history: bool,
+    status_path: Path,
+) -> None:
+    global _shutdown_requested
+
+    set_runtime_active_cameras(status_path, camera_ids)
+
+    threads: list[Thread] = []
+    for camera_id in camera_ids:
+        thread = Thread(
+            target=_run_daemon,
+            name=f"camera-{camera_id}",
+            kwargs={
+                "app": app,
+                "camera_id": camera_id,
+                "frames_dir": frames_dir,
+                "interval": interval,
+                "keep_history": keep_history,
+                "status_path": status_path,
+            },
+            daemon=True,
+        )
+        thread.start()
+        threads.append(thread)
+        logger.info("Started camera worker thread for %s", camera_id)
+
+    try:
+        while not _shutdown_requested:
+            failed_threads = [thread.name for thread in threads if not thread.is_alive()]
+            if failed_threads:
+                logger.error("Camera worker thread exited unexpectedly: %s", ", ".join(failed_threads))
+                _shutdown_requested = True
+                break
+            time.sleep(1)
+    finally:
+        for thread in threads:
+            thread.join(timeout=max(interval + 5, 10))
+
+
+def _run_single_shot(app: Any, image_path: str, *, camera_id: str, status_path: Path) -> None:
     """Run the pipeline once against a local image file and exit."""
     if not Path(image_path).is_file():
         logger.error("--image path does not exist: %s", image_path)
         sys.exit(1)
-    _run_pipeline(image_path, app, history_context=[])
+    _run_pipeline(
+        image_path,
+        app,
+        history_context=[],
+        camera_id=camera_id,
+        status_path=status_path,
+        interval_seconds=0,
+    )
 
 
 def _run_report() -> None:
     """Generate the daily report immediately and exit."""
-    from skymirror.agents.report_generator import generate_daily_report
+    from skymirror.graph.graph import app
+
     logger.info("Generating daily report on demand.")
-    generate_daily_report()
-    logger.info("Daily report complete.")
+    final_state = app.invoke(
+        {
+            "workflow_mode": "report",
+            "target_date": "",
+            "oa_log_dir": "data/oa_log",
+            "output_dir": "data/reports",
+            "report_path": "",
+            "metadata": {},
+        }
+    )
+    logger.info("Daily report complete: %s", final_state.get("report_path", "(unknown)"))
 
 
 # ---------------------------------------------------------------------------
@@ -350,20 +584,26 @@ def main() -> None:
 
     # --image mode: single-shot, no scheduler needed
     if args.image:
-        _run_single_shot(app, args.image)
+        status_path = Path(
+            os.getenv("DASHBOARD_STATUS_PATH", _DEFAULT_DASHBOARD_STATUS_PATH)
+        ).resolve()
+        camera_id = os.getenv("TARGET_CAMERA_ID", "local")
+        _run_single_shot(app, args.image, camera_id=camera_id, status_path=status_path)
         flush_langsmith_traces()
         return
 
     # --- Daemon mode: read configuration -------------------------------------
-    camera_id: str = os.getenv("TARGET_CAMERA_ID", "4798")
+    camera_ids = _resolve_target_camera_ids()
     interval: int = int(os.getenv("PROCESSING_INTERVAL_SECONDS", "20"))
     frames_dir = Path(os.getenv("FRAMES_DIR", "data/frames")).resolve()
+    status_path = Path(os.getenv("DASHBOARD_STATUS_PATH", _DEFAULT_DASHBOARD_STATUS_PATH)).resolve()
     keep_history: bool = os.getenv("KEEP_FRAME_HISTORY", "true").lower() != "false"
 
     logger.info("Configuration:")
-    logger.info("  TARGET_CAMERA_ID           = %s", camera_id)
+    logger.info("  TARGET_CAMERA_IDS          = %s", ", ".join(camera_ids))
     logger.info("  PROCESSING_INTERVAL_SECONDS = %ds", interval)
     logger.info("  FRAMES_DIR                 = %s", frames_dir)
+    logger.info("  DASHBOARD_STATUS_PATH      = %s", status_path)
     logger.info("  KEEP_FRAME_HISTORY         = %s", keep_history)
 
     # --- Start APScheduler for daily reports (background thread) -------------
@@ -391,14 +631,16 @@ def main() -> None:
 
     # --- Enter the main polling loop -----------------------------------------
     try:
-        _run_daemon(
+        _run_multi_camera_daemon(
             app=app,
-            camera_id=camera_id,
+            camera_ids=camera_ids,
             frames_dir=frames_dir,
             interval=interval,
             keep_history=keep_history,
+            status_path=status_path,
         )
     finally:
+        clear_runtime_active_cameras(status_path)
         if scheduler is not None:
             scheduler.shutdown(wait=False)
             logger.info("APScheduler shut down.")

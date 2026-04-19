@@ -1,7 +1,8 @@
-"""validator.py - OpenAI reconciliation node for dual-VLM output."""
+"""validator.py - OpenAI image cross-check for a single VLM scene report."""
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -10,13 +11,15 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from skymirror.agents.prompts import VALIDATOR_SYSTEM_PROMPT
+from skymirror.agents.scene_schema import ValidatedSceneReport, VlmSceneReport, coerce_model
+from skymirror.agents.vlm_agent import ImagePayload, build_image_payload
 from skymirror.graph.state import SkymirrorState
 from skymirror.tools.llm_factory import build_openai_chat_model, get_openai_agent_model
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_OPENAI_VALIDATOR_MODEL = "gpt-5.4-mini"
-_DEFAULT_MAX_TOKENS = 384
+_DEFAULT_OPENAI_VALIDATOR_MODEL = "gpt-5.4"
+_DEFAULT_MAX_TOKENS = 768
 _DEFAULT_TEMPERATURE = 0.0
 
 
@@ -67,85 +70,93 @@ def _load_validator_config() -> ValidatorConfig:
     )
 
 
-def _build_validator_prompt(gemini_text: str, qwen_text: str) -> str:
+def _build_validator_prompt(candidate_report: VlmSceneReport) -> str:
     return (
-        "Reconcile these two traffic-scene descriptions into one concise factual summary.\n\n"
-        "Rules:\n"
-        "- Keep only directly observable traffic facts.\n"
-        "- Remove speculation and stylistic language.\n"
-        "- Drop conflicting claims unless both descriptions support them.\n"
-        "- Prefer overlap between Gemini and Qwen.\n"
-        "- Output plain text only.\n\n"
-        f"Gemini description:\n{gemini_text}\n\n"
-        f"Qwen description:\n{qwen_text}"
+        "Review this candidate traffic-scene JSON against the image.\n\n"
+        "Validation rules:\n"
+        "- Keep only claims clearly supported by the image.\n"
+        "- If the candidate report overstates, speculates, or conflicts with the image, correct it conservatively.\n"
+        "- normalized_description must be concise, factual, and suitable for downstream routing.\n"
+        "- consensus_observations should be short atomic facts that survived cross-checking.\n"
+        "- signals must match the corrected description and stay conservative.\n"
+        "- discarded_claims should list the candidate claims you removed or softened because they were unsupported, too strong, or inaccurate.\n\n"
+        "Candidate VLM scene report:\n"
+        f"{json.dumps(candidate_report.model_dump(), indent=2)}"
     )
 
 
-def _extract_message_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content.strip()
-
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                if block.strip():
-                    parts.append(block.strip())
-                continue
-
-            if isinstance(block, dict):
-                text = block.get("text")
-            else:
-                text = getattr(block, "text", None)
-
-            if isinstance(text, str) and text.strip():
-                parts.append(text.strip())
-
-        return "\n".join(parts).strip()
-
-    return str(content).strip()
-
-
-def _invoke_openai_validator(config: ValidatorConfig, gemini_text: str, qwen_text: str) -> str:
+def _invoke_openai_validator(
+    config: ValidatorConfig,
+    image: ImagePayload,
+    candidate_report: VlmSceneReport,
+) -> ValidatedSceneReport:
     llm = build_openai_chat_model(
         temperature=config.temperature,
         model=config.model,
         api_key=config.api_key,
         max_tokens=config.max_tokens,
     )
-    response = llm.invoke(
+    structured_llm = llm.with_structured_output(ValidatedSceneReport)
+    response = structured_llm.invoke(
         [
             SystemMessage(content=VALIDATOR_SYSTEM_PROMPT),
-            HumanMessage(content=_build_validator_prompt(gemini_text, qwen_text)),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": _build_validator_prompt(candidate_report)},
+                    {"type": "image_url", "image_url": {"url": image.data_url}},
+                ]
+            ),
         ]
     )
-    return _extract_message_text(getattr(response, "content", response))
+    return coerce_model(response, ValidatedSceneReport)
+
+
+def _validated_text_from_report(report: ValidatedSceneReport) -> str:
+    normalized_description = report.normalized_description.strip()
+    if normalized_description:
+        return normalized_description
+    fallback = "; ".join(report.consensus_observations).strip()
+    return fallback
 
 
 def validator_agent_node(state: SkymirrorState) -> dict[str, Any]:
-    """Reconcile Gemini and Qwen outputs into one validated summary."""
-    vlm_outputs = state.get("vlm_outputs", {})
-    gemini_text = vlm_outputs.get("gemini", "").strip()
-    qwen_text = vlm_outputs.get("qwen", "").strip()
+    """Cross-check one VLM scene report against the frame image."""
+    image_path = state.get("image_path")
+    if not image_path:
+        raise ValueError("validator_agent_node requires state['image_path'].")
 
-    if not gemini_text or not qwen_text:
-        raise ValueError("validator_agent_node requires both Gemini and Qwen outputs.")
+    candidate_payload = state.get("vlm_output")
+    if not candidate_payload:
+        raise ValueError("validator_agent_node requires state['vlm_output'].")
 
+    candidate_report = coerce_model(candidate_payload, VlmSceneReport)
+    image = build_image_payload(image_path)
     config = _load_validator_config()
-    validated_text = _invoke_openai_validator(config, gemini_text, qwen_text)
-    if not validated_text:
-        raise RuntimeError("OpenAI validator returned an empty validated_text.")
+    validated_scene = _invoke_openai_validator(config, image, candidate_report)
 
-    logger.info("validator_agent: Generated validated text (%d chars).", len(validated_text))
+    validated_text = _validated_text_from_report(validated_scene)
+    if not validated_text:
+        raise RuntimeError("OpenAI validator returned an empty normalized_description.")
+
+    validated_signals = validated_scene.signals.to_state_dict()
+
+    logger.info(
+        "validator_agent: Cross-checked scene JSON with %d retained observations.",
+        len(validated_scene.consensus_observations),
+    )
     return {
+        "validated_scene": validated_scene.model_dump(),
         "validated_text": validated_text,
+        "validated_signals": validated_signals,
         "metadata": {
             "validator": {
                 "provider": "openai",
                 "model": config.model,
-                "input_sources": ["gemini", "qwen"],
-                "gemini_chars": len(gemini_text),
-                "qwen_chars": len(qwen_text),
+                "review_mode": "image_cross_check",
+                "input_sources": ["vlm_output"],
+                "candidate_observation_count": len(candidate_report.direct_observations),
+                "consensus_observation_count": len(validated_scene.consensus_observations),
+                "discarded_claim_count": len(validated_scene.discarded_claims),
             }
         },
     }

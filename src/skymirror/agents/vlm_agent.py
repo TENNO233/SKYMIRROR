@@ -1,5 +1,5 @@
 """
-vlm_agent.py - Guardrail and dual-VLM nodes for SKYMIRROR.
+vlm_agent.py - Image guardrail and single-VLM scene extraction for SKYMIRROR.
 """
 
 from __future__ import annotations
@@ -19,16 +19,15 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 from skymirror.agents.prompts import GUARDRAIL_SYSTEM_PROMPT, VLM_SYSTEM_PROMPT
+from skymirror.agents.scene_schema import VlmSceneReport, coerce_model
 from skymirror.graph.state import SkymirrorState
 from skymirror.tools.llm_factory import build_openai_chat_model, get_openai_agent_model
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_GEMINI_VLM_MODEL = "gemini-3-flash-preview"
+_DEFAULT_OPENAI_VLM_MODEL = "gpt-5.4"
 _DEFAULT_OPENAI_GUARDRAIL_MODEL = "gpt-5.4-mini"
-_DEFAULT_QWEN_VLM_MODEL = "qwen3.6-plus"
-_DEFAULT_DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/api/v1"
-_DEFAULT_MAX_TOKENS = 384
+_DEFAULT_MAX_TOKENS = 2048
 _DEFAULT_TEMPERATURE = 0.0
 _DEFAULT_GUARDRAIL_MAX_TOKENS = 256
 _IMAGE_FETCH_TIMEOUT_SECONDS = 10.0
@@ -37,13 +36,25 @@ _MAX_IMAGE_DIMENSION = 8192
 _SUPPORTED_MEDIA_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
 
 _VLM_USER_PROMPT = (
-    "Describe this traffic camera frame in concise factual language. Include "
-    "only directly visible traffic details: vehicle positions, pedestrian "
-    "presence, signals, lane usage, road markings, obstructions, hazards, and "
-    "visibility conditions."
+    "Return one JSON object with exactly these top-level fields:\n"
+    "- summary: 1 to 3 sentences describing the traffic scene using only directly visible facts.\n"
+    "- direct_observations: 4 to 10 short atomic observations.\n"
+    "- road_features: visible roadway layout or markings such as intersection, junction, crosswalk, stop line, shoulder, lane arrows, bus lane, median, yellow box junction.\n"
+    "- traffic_controls: visible signals or signs such as red traffic light, green traffic light, turn arrow, pedestrian signal, overhead sign.\n"
+    "- notable_hazards: directly visible hazards or disruptions such as standing water, debris, blocked lane, collision damage, poor visibility.\n"
+    "- signals: object with these exact fields and conservative values only:\n"
+    "  vehicle_count, stopped_vehicle_count, pedestrian_present, blocked_lanes, queueing,\n"
+    "  water_present, construction_present, obstacle_present, low_visibility,\n"
+    "  lighting_abnormal, wrong_way_cue, collision_cue, dangerous_crossing_cue,\n"
+    "  conflict_risk_cue.\n\n"
+    "Signal guidance:\n"
+    "- Count only clearly visible vehicles.\n"
+    "- stopped_vehicle_count counts vehicles clearly stationary in the frame.\n"
+    "- blocked_lanes is the number of lanes visibly obstructed right now.\n"
+    "- Set *_cue booleans true only when the cue is directly observable.\n"
+    "- If uncertain, use false or 0.\n"
+    "- Return JSON only. No markdown, no prose outside the JSON object."
 )
-
-_QWEN_VLM_PROMPT = f"{VLM_SYSTEM_PROMPT}\n\n{_VLM_USER_PROMPT}"
 
 _GUARDRAIL_USER_PROMPT = (
     "Classify whether this traffic camera frame is safe for downstream traffic "
@@ -53,9 +64,9 @@ _GUARDRAIL_USER_PROMPT = (
 
 
 @dataclass(frozen=True)
-class GeminiConfig:
+class VisionConfig:
     api_key: str
-    vlm_model: str
+    model: str
     max_tokens: int
     temperature: float
 
@@ -66,13 +77,6 @@ class OpenAIGuardrailConfig:
     model: str
     max_tokens: int
     temperature: float
-
-
-@dataclass(frozen=True)
-class QwenConfig:
-    api_key: str
-    model: str
-    base_url: str
 
 
 @dataclass(frozen=True)
@@ -126,11 +130,14 @@ def _read_required_env(name: str) -> str:
     return value
 
 
-def _load_gemini_config() -> GeminiConfig:
-    return GeminiConfig(
-        api_key=_read_required_env("GEMINI_API_KEY"),
-        vlm_model=os.getenv("GEMINI_VLM_MODEL", _DEFAULT_GEMINI_VLM_MODEL).strip()
-        or _DEFAULT_GEMINI_VLM_MODEL,
+def _load_vlm_config() -> VisionConfig:
+    return VisionConfig(
+        api_key=_read_required_env("OPENAI_API_KEY"),
+        model=os.getenv(
+            "OPENAI_VLM_MODEL",
+            os.getenv("OPENAI_AGENT_MODEL", _DEFAULT_OPENAI_VLM_MODEL),
+        ).strip()
+        or _DEFAULT_OPENAI_VLM_MODEL,
         max_tokens=_read_int_env("VLM_MAX_TOKENS", _DEFAULT_MAX_TOKENS),
         temperature=_read_float_env("VLM_TEMPERATURE", _DEFAULT_TEMPERATURE),
     )
@@ -146,16 +153,6 @@ def _load_guardrail_config() -> OpenAIGuardrailConfig:
         or get_openai_agent_model(),
         max_tokens=_read_int_env("GUARDRAIL_MAX_TOKENS", _DEFAULT_GUARDRAIL_MAX_TOKENS),
         temperature=_read_float_env("GUARDRAIL_TEMPERATURE", 0.0),
-    )
-
-
-def _load_qwen_config() -> QwenConfig:
-    return QwenConfig(
-        api_key=_read_required_env("DASHSCOPE_API_KEY"),
-        model=os.getenv("QWEN_VLM_MODEL", _DEFAULT_QWEN_VLM_MODEL).strip()
-        or _DEFAULT_QWEN_VLM_MODEL,
-        base_url=os.getenv("DASHSCOPE_BASE_URL", _DEFAULT_DASHSCOPE_BASE_URL).strip()
-        or _DEFAULT_DASHSCOPE_BASE_URL,
     )
 
 
@@ -192,7 +189,7 @@ def _read_image_bytes(image_path: str) -> tuple[bytes, str]:
     return image_bytes, str(image_file.resolve())
 
 
-def _build_image_payload(image_path: str) -> ImagePayload:
+def build_image_payload(image_path: str) -> ImagePayload:
     image_bytes, source = _read_image_bytes(image_path)
 
     try:
@@ -232,36 +229,15 @@ def _build_image_payload(image_path: str) -> ImagePayload:
     )
 
 
-def _extract_text_content(content: Any) -> str:
-    if isinstance(content, str):
-        return content.strip()
-
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                if block.strip():
-                    parts.append(block.strip())
-                continue
-
-            if isinstance(block, dict):
-                text = block.get("text")
-            else:
-                text = getattr(block, "text", None)
-
-            if isinstance(text, str) and text.strip():
-                parts.append(text.strip())
-
-        return "\n".join(parts).strip()
-
-    return str(content).strip()
-
-
 def _normalize_guardrail_assessment(assessment: GuardrailAssessment) -> GuardrailAssessment:
     if assessment.status == "allowed":
         return assessment.model_copy(update={"allowed": True})
 
     return assessment.model_copy(update={"allowed": False})
+
+
+def _coerce_scene_report(value: Any) -> VlmSceneReport:
+    return coerce_model(value, VlmSceneReport)
 
 
 def _classify_image_safety(image: ImagePayload, config: OpenAIGuardrailConfig) -> GuardrailAssessment:
@@ -291,51 +267,26 @@ def _classify_image_safety(image: ImagePayload, config: OpenAIGuardrailConfig) -
     raise RuntimeError("OpenAI guardrail returned no structured assessment.")
 
 
-def _invoke_gemini_vlm(image: ImagePayload, config: GeminiConfig) -> str:
-    from google import genai
-    from google.genai import types
-
-    client = genai.Client(api_key=config.api_key)
-    response = client.models.generate_content(
-        model=config.vlm_model,
-        contents=[
-            types.Part.from_bytes(data=image.bytes_data, mime_type=image.media_type),
-            _VLM_USER_PROMPT,
-        ],
-        config=types.GenerateContentConfig(
-            system_instruction=VLM_SYSTEM_PROMPT,
-            temperature=config.temperature,
-            max_output_tokens=config.max_tokens,
-        ),
-    )
-    return (response.text or "").strip()
-
-
-def _invoke_qwen_vlm(image: ImagePayload, config: QwenConfig) -> str:
-    import dashscope
-    from dashscope import MultiModalConversation
-
-    dashscope.base_http_api_url = config.base_url
-    response = MultiModalConversation.call(
-        api_key=config.api_key,
+def _invoke_vlm(image: ImagePayload, config: VisionConfig) -> VlmSceneReport:
+    llm = build_openai_chat_model(
+        temperature=config.temperature,
         model=config.model,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"image": image.data_url},
-                    {"text": _QWEN_VLM_PROMPT},
-                ],
-            }
-        ],
+        api_key=config.api_key,
+        max_tokens=config.max_tokens,
     )
-
-    try:
-        content = response.output.choices[0].message.content
-    except (AttributeError, IndexError, KeyError, TypeError) as exc:
-        raise RuntimeError(f"Qwen returned an unexpected response shape: {response!r}") from exc
-
-    return _extract_text_content(content)
+    structured_llm = llm.with_structured_output(VlmSceneReport)
+    response = structured_llm.invoke(
+        [
+            SystemMessage(content=VLM_SYSTEM_PROMPT),
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": _VLM_USER_PROMPT},
+                    {"type": "image_url", "image_url": {"url": image.data_url}},
+                ]
+            ),
+        ]
+    )
+    return _coerce_scene_report(response)
 
 
 def _build_blocked_guardrail_result(reason: str, *, category: str) -> dict[str, Any]:
@@ -354,7 +305,7 @@ def image_guardrail_node(state: SkymirrorState) -> dict[str, Any]:
         raise ValueError("image_guardrail_node requires state['image_path'].")
 
     try:
-        image = _build_image_payload(image_path)
+        image = build_image_payload(image_path)
     except Exception as exc:
         logger.warning("image_guardrail: Local preflight blocked frame - %s", exc)
         result = _build_blocked_guardrail_result(str(exc), category="invalid_image")
@@ -430,64 +381,35 @@ def image_guardrail_node(state: SkymirrorState) -> dict[str, Any]:
     }
 
 
-def gemini_vlm_node(state: SkymirrorState) -> dict[str, Any]:
-    """Generate a traffic-scene description with Gemini."""
+def vlm_agent_node(state: SkymirrorState) -> dict[str, Any]:
+    """Generate one structured traffic-scene report with OpenAI vision."""
     image_path = state.get("image_path")
     if not image_path:
-        raise ValueError("gemini_vlm_node requires state['image_path'].")
+        raise ValueError("vlm_agent_node requires state['image_path'].")
 
-    image = _build_image_payload(image_path)
-    config = _load_gemini_config()
-    text = _invoke_gemini_vlm(image, config)
-    if not text:
-        raise RuntimeError("Gemini VLM returned an empty description.")
+    image = build_image_payload(image_path)
+    config = _load_vlm_config()
+    report = _invoke_vlm(image, config)
+    if not report.summary and not report.direct_observations:
+        raise RuntimeError("OpenAI VLM returned an empty scene report.")
 
-    logger.info("gemini_vlm: Generated description (%d chars).", len(text))
+    logger.info(
+        "vlm_agent: Generated scene report (%d observations).",
+        len(report.direct_observations),
+    )
     return {
-        "vlm_outputs": {"gemini": text},
+        "vlm_output": report.model_dump(),
         "metadata": {
             "vlm": {
-                "gemini": {
-                    "provider": "gemini",
-                    "model": config.vlm_model,
-                    "source": image.source,
-                    "media_type": image.media_type,
-                    "width": image.width,
-                    "height": image.height,
-                    "byte_count": image.byte_count,
-                }
-            }
-        },
-    }
-
-
-def qwen_vlm_node(state: SkymirrorState) -> dict[str, Any]:
-    """Generate a traffic-scene description with Qwen 3.6 Plus."""
-    image_path = state.get("image_path")
-    if not image_path:
-        raise ValueError("qwen_vlm_node requires state['image_path'].")
-
-    image = _build_image_payload(image_path)
-    config = _load_qwen_config()
-    text = _invoke_qwen_vlm(image, config)
-    if not text:
-        raise RuntimeError("Qwen VLM returned an empty description.")
-
-    logger.info("qwen_vlm: Generated description (%d chars).", len(text))
-    return {
-        "vlm_outputs": {"qwen": text},
-        "metadata": {
-            "vlm": {
-                "qwen": {
-                    "provider": "qwen",
-                    "model": config.model,
-                    "base_url": config.base_url,
-                    "source": image.source,
-                    "media_type": image.media_type,
-                    "width": image.width,
-                    "height": image.height,
-                    "byte_count": image.byte_count,
-                }
+                "provider": "openai",
+                "model": config.model,
+                "source": image.source,
+                "media_type": image.media_type,
+                "width": image.width,
+                "height": image.height,
+                "byte_count": image.byte_count,
+                "summary_chars": len(report.summary),
+                "observation_count": len(report.direct_observations),
             }
         },
     }

@@ -33,6 +33,7 @@ def _deep_merge_dicts(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
 # Shared Schemas
 # ---------------------------------------------------------------------------
 
+WorkflowMode = Literal["frame", "report"]
 SeverityLevel = Literal["low", "medium", "high", "critical"]
 ConfidenceLevel = Literal["low", "medium", "high"]
 ImpactScope = Literal["local", "single_lane", "multi_lane", "intersection"]
@@ -85,6 +86,7 @@ class HistoryFrame(TypedDict, total=False):
     """Snapshot of a previous frame used for short-term temporal reasoning."""
 
     image_path: str
+    validated_scene: dict[str, Any]
     validated_text: str
     validated_signals: ValidatedSignals
     expert_results: dict[str, Any]
@@ -100,18 +102,25 @@ class SkymirrorState(TypedDict, total=False):
 
     Fields
     ------
+    workflow_mode:
+        Top-level route selector. `"frame"` runs the traffic-frame pipeline and
+        `"report"` runs the daily report generator path.
     image_path:
         Absolute path or URI of the traffic camera frame being processed.
+    target_date / oa_log_dir / output_dir / report_path:
+        Inputs and outputs used by the daily report generator path.
     guardrail_result:
-        Result of the image safety gate before the VLMs are invoked.
-    vlm_outputs:
-        Parallel-safe mapping of provider name to raw description text.
-        Expected keys: `gemini`, `qwen`.
+        Result of the image safety gate before the VLM is invoked.
+    vlm_output:
+        Structured scene report emitted by the single VLM pass.
+    validated_scene:
+        Canonical JSON emitted by the validator after cross-checking the VLM
+        report against the image.
     validated_text:
-        Canonical text produced by the validator after reconciling Gemini and
-        Qwen outputs.
+        Canonical normalized text derived from `validated_scene`.
     validated_signals:
-        Lightweight structured cues extracted from `validated_text`.
+        Lightweight structured cues extracted by the validator for downstream
+        orchestration and expert routing.
     history_context:
         Short-term in-memory history for the same camera. Used by experts to
         infer persistence and simple temporal patterns such as repeated queueing.
@@ -126,9 +135,15 @@ class SkymirrorState(TypedDict, total=False):
         Diagnostics and per-stage runtime details.
     """
 
+    workflow_mode: WorkflowMode
     image_path: str
+    target_date: str
+    oa_log_dir: str
+    output_dir: str
+    report_path: str
     guardrail_result: dict[str, Any]
-    vlm_outputs: Annotated[dict[str, str], _merge_dicts]
+    vlm_output: dict[str, Any]
+    validated_scene: dict[str, Any]
     validated_text: str
     validated_signals: ValidatedSignals
     history_context: list[HistoryFrame]

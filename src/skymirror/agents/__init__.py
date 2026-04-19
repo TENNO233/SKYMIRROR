@@ -13,17 +13,12 @@ from skymirror.agents.experts import (
     safety_expert_node,
 )
 from skymirror.agents.validator import validator_agent_node
-from skymirror.agents.vlm_agent import (
-    gemini_vlm_node,
-    image_guardrail_node,
-    qwen_vlm_node,
-)
 from skymirror.agents.alert_manager import generate_alerts
+from skymirror.agents.vlm_agent import image_guardrail_node, vlm_agent_node
 
 __all__ = [
     "image_guardrail_node",
-    "gemini_vlm_node",
-    "qwen_vlm_node",
+    "vlm_agent_node",
     "validator_agent_node",
     "order_expert_node",
     "safety_expert_node",

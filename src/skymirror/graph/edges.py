@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 from typing import Union
 
-from langgraph.graph import END
 from langgraph.types import Send
 
 from skymirror.graph.state import SkymirrorState
@@ -112,10 +111,11 @@ _EXPERT_SIGNAL_FIELDS: dict[str, tuple[str, ...]] = {
 
 _FALLBACK_NODE: str = "alert_manager"
 _GUARDRAIL_BLOCKED_NODE = "end_pipeline"
+_ORCHESTRATOR_FINISH_NODE = "finish"
 
 
-def route_after_guardrail(state: SkymirrorState) -> Union[list[Send], str]:
-    """Route safe frames to both VLMs, and fail closed otherwise."""
+def route_after_guardrail(state: SkymirrorState) -> str:
+    """Route safe frames to the single VLM stage, and fail closed otherwise."""
     guardrail_result = state.get("guardrail_result", {})
     allowed = bool(guardrail_result.get("allowed", False))
 
@@ -127,11 +127,8 @@ def route_after_guardrail(state: SkymirrorState) -> Union[list[Send], str]:
         )
         return _GUARDRAIL_BLOCKED_NODE
 
-    logger.info("route_after_guardrail: Guardrail passed; fan-out to Gemini and Qwen.")
-    return [
-        Send("gemini_vlm", state),
-        Send("qwen_vlm", state),
-    ]
+    logger.info("route_after_guardrail: Guardrail passed; routing to VLM.")
+    return "vlm_agent"
 
 
 def _signal_activates_expert(expert_node: str, signals: dict[str, object]) -> bool:
@@ -163,7 +160,7 @@ def route_to_experts(
 
     if not validated_text and not validated_signals:
         logger.warning(
-            "route_to_experts: validator output is empty — skipping to %s",
+            "route_to_experts: validator output is empty - skipping to %s",
             _FALLBACK_NODE,
         )
         return _FALLBACK_NODE
@@ -181,12 +178,12 @@ def route_to_experts(
 
     if not active_experts:
         logger.info(
-            "route_to_experts: No expert matches found — routing directly to %s.",
+            "route_to_experts: No expert matches found - routing directly to %s.",
             _FALLBACK_NODE,
         )
         return _FALLBACK_NODE
 
-    logger.info("route_to_experts: Activated experts → %s", active_experts)
+    logger.info("route_to_experts: Activated experts -> %s", active_experts)
     state_with_experts: SkymirrorState = {**state, "active_experts": active_experts}  # type: ignore[misc]
     return [Send(expert, state_with_experts) for expert in active_experts]
 
@@ -213,15 +210,15 @@ def route_from_orchestrator(
     Evaluate pass — alert needed:
         Returns ``"alert_manager"`` to trigger the alert synthesis node.
 
-    Evaluate pass — no action needed:
-        Returns ``END`` to terminate the pipeline cleanly.
+    Evaluate pass - no action needed:
+        Returns ``"finish"`` to terminate the pipeline cleanly.
 
     Args:
         state: Current pipeline state after orchestrator_node has written
             ``next_nodes``.
 
     Returns:
-        A list of Send objects, the string ``"alert_manager"``, or ``END``.
+        A list of Send objects, ``"alert_manager"``, or ``"finish"``.
     """
     next_nodes: list[str] = state.get("next_nodes", [])
 
@@ -238,5 +235,5 @@ def route_from_orchestrator(
         logger.info("route_from_orchestrator: Routing to alert_manager.")
         return "alert_manager"
 
-    logger.info("route_from_orchestrator: FINISH — no alert needed.")
-    return END
+    logger.info("route_from_orchestrator: FINISH - no alert needed.")
+    return _ORCHESTRATOR_FINISH_NODE
