@@ -15,6 +15,10 @@ VLM_SYSTEM_PROMPT = textwrap.dedent(
     - Prefer conservative counts for vehicles, stopped vehicles, and blocked lanes.
     - Mention risk-relevant facts only when they are directly observable.
     - Summary and observations must stay factual and concise.
+    - Prioritize operations-relevant detail over visual composition:
+      traffic flow condition, stopped vehicles, lane obstruction, visible
+      violations, conflict cues, roadway hazards, weather/visibility issues,
+      and emergency-response relevance.
     """
 ).strip()
 
@@ -48,6 +52,11 @@ VALIDATOR_SYSTEM_PROMPT = textwrap.dedent(
       correct it conservatively or discard the claim.
     - Emit a normalized description that is concise, factual, and rich enough
       for downstream keyword and signal-based routing.
+    - Frame the normalized description as an operations-facing surveillance
+      brief, not as a generic picture caption.
+    - Prioritize what a government traffic operations team needs to know:
+      traffic flow condition, visible violations, safety risk, roadway hazard,
+      and whether the frame suggests immediate action or routine monitoring.
     - Emit structured signals that downstream experts can consume directly.
     """
 ).strip()

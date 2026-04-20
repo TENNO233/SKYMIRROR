@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -30,3 +31,32 @@ def flush_langsmith_traces() -> None:
         wait_for_all_tracers()
     except Exception as exc:
         logger.warning("LangSmith trace flush failed: %s", exc)
+
+
+def get_current_run_trace_info() -> dict[str, Any]:
+    """Return the current LangSmith run identifiers and UI URL when available."""
+    if not langsmith_tracing_enabled():
+        return {}
+
+    try:
+        from langsmith.run_helpers import get_current_run_tree
+
+        run_tree = get_current_run_tree()
+        if run_tree is None:
+            return {}
+
+        trace_url = run_tree.get_url()
+        payload = {
+            "trace_url": str(trace_url).strip(),
+            "run_id": str(run_tree.id),
+            "trace_id": str(run_tree.trace_id),
+            "project_name": str(getattr(run_tree, "session_name", "")).strip(),
+        }
+        return {
+            key: value
+            for key, value in payload.items()
+            if isinstance(value, str) and value.strip()
+        }
+    except Exception as exc:
+        logger.warning("LangSmith trace URL lookup failed: %s", exc)
+        return {}

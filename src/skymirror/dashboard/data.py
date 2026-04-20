@@ -270,19 +270,37 @@ def _build_camera_state(
         image_source = "approved_frame_pending"
 
     runtime_state = runtime_state if isinstance(runtime_state, dict) else {}
+    metadata = runtime_state.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
     alerts = runtime_state.get("alerts") if isinstance(runtime_state.get("alerts"), list) else []
     first_alert = alerts[0] if alerts and isinstance(alerts[0], dict) else {}
     signals = runtime_state.get("validated_signals")
     signals = signals if isinstance(signals, dict) else {}
+    active_experts = [
+        str(expert).strip()
+        for expert in runtime_state.get("active_experts", [])
+        if str(expert).strip()
+    ] if isinstance(runtime_state.get("active_experts"), list) else []
+    current_agents = [
+        str(agent).strip()
+        for agent in runtime_state.get("current_agents", [])
+        if str(agent).strip()
+    ] if isinstance(runtime_state.get("current_agents"), list) else []
     last_frame_at = _parse_timestamp(runtime_state.get("last_frame_at")) or frame_timestamp
     last_analysis_at = _parse_timestamp(runtime_state.get("last_analysis_at"))
 
     status_level, status_label, status_detail = _derive_runtime_status(runtime_state, bool(image_url))
-    status_summary_text = (
+    status_log_fallback = (
         str(runtime_state.get("status_message", "")).strip()
         or str(first_alert.get("message", "")).strip()
         or status_detail
         or "No backend status has been published for this camera yet."
+    )
+    status_summary_text = _derive_status_summary_text(
+        runtime_state,
+        status_label=status_label,
+        first_alert=first_alert,
+        image_available=bool(image_url),
     )
     analysis_summary_text = (
         str(runtime_state.get("validated_text", "")).strip()
@@ -292,6 +310,12 @@ def _build_camera_state(
             if last_analysis_at is None
             else "The latest completed analysis did not include a summary."
         )
+    )
+    status_history = _build_status_history(runtime_state, fallback_message=status_log_fallback)
+    analysis_history = _build_analysis_history(
+        runtime_state,
+        fallback_summary=analysis_summary_text,
+        fallback_timestamp=last_analysis_at,
     )
 
     return {
@@ -306,13 +330,23 @@ def _build_camera_state(
         "status_label": status_label,
         "status_detail": status_detail,
         "status_summary_text": status_summary_text,
+        "status_history": status_history,
         "analysis_summary_text": analysis_summary_text,
+        "analysis_history": analysis_history,
         "summary_text": analysis_summary_text,
         "severity": str(first_alert.get("severity", "")).lower() or None,
         "emergency_type": first_alert.get("emergency_type") or first_alert.get("type"),
         "dispatch_status": first_alert.get("dispatch_status"),
         "dispatch_targets": first_alert.get("dispatched_to") or [],
-        "active_experts": runtime_state.get("active_experts") if isinstance(runtime_state.get("active_experts"), list) else [],
+        "active_experts": active_experts,
+        "active_agents": _derive_active_agents(
+            runtime_state,
+            active_experts=active_experts,
+            alerts=alerts,
+            validated_signals=signals,
+        ),
+        "current_agents": current_agents,
+        "langsmith_trace_url": _extract_langsmith_trace_url(metadata),
         "signal_snapshot": {
             "vehicle_count": _coerce_int(signals.get("vehicle_count")),
             "stopped_vehicle_count": _coerce_int(signals.get("stopped_vehicle_count")),
@@ -326,6 +360,62 @@ def _build_camera_state(
         "frame_available": bool(image_url),
         "backend_status": str(runtime_state.get("backend_status", "")).strip(),
     }
+
+
+def _derive_active_agents(
+    runtime_state: dict[str, Any],
+    *,
+    active_experts: list[str],
+    alerts: list[dict[str, Any]],
+    validated_signals: dict[str, Any],
+) -> list[str]:
+    metadata = runtime_state.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    guardrail_result = runtime_state.get("guardrail_result")
+    guardrail_result = guardrail_result if isinstance(guardrail_result, dict) else {}
+    validated_text = str(runtime_state.get("validated_text", "")).strip()
+
+    agents: list[str] = []
+    seen: set[str] = set()
+
+    def add(agent_name: str, *, enabled: bool = True) -> None:
+        normalized = str(agent_name).strip()
+        if not enabled or not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        agents.append(normalized)
+
+    guardrail_ran = bool(guardrail_result or metadata.get("guardrail"))
+    pipeline_progressed = bool(
+        validated_text
+        or validated_signals
+        or active_experts
+        or alerts
+        or metadata.get("vlm")
+        or metadata.get("validator")
+        or metadata.get("orchestrator")
+        or metadata.get("alert_manager")
+    )
+    orchestrator_ran = bool(active_experts or alerts or metadata.get("orchestrator") or metadata.get("alert_manager"))
+
+    add("image_guardrail", enabled=guardrail_ran)
+    add("vlm_agent", enabled=pipeline_progressed)
+    add("validator_agent", enabled=pipeline_progressed)
+    add("orchestrator_agent", enabled=orchestrator_ran)
+    for expert in active_experts:
+        add(expert)
+    add("alert_manager", enabled=bool(alerts or metadata.get("alert_manager")))
+
+    return agents
+
+
+def _extract_langsmith_trace_url(metadata: dict[str, Any]) -> str | None:
+    langsmith_metadata = metadata.get("langsmith")
+    if not isinstance(langsmith_metadata, dict):
+        return None
+
+    trace_url = str(langsmith_metadata.get("trace_url", "")).strip()
+    return trace_url or None
 
 
 def _build_image_candidates(
@@ -405,6 +495,159 @@ def _derive_runtime_status(runtime_state: dict[str, Any], image_available: bool)
     if image_available:
         return ("monitoring", "Standby", "Feed available. No backend status has been published yet.")
     return ("offline", "Standby", "No backend status or live feed is currently available.")
+
+
+def _derive_status_summary_text(
+    runtime_state: dict[str, Any],
+    *,
+    status_label: str,
+    first_alert: dict[str, Any],
+    image_available: bool,
+) -> str:
+    raw_status = str(runtime_state.get("backend_status", "")).strip().lower()
+    emergency_type = _humanize_phrase(first_alert.get("emergency_type") or first_alert.get("type"))
+    severity = _humanize_phrase(first_alert.get("severity"))
+
+    if raw_status == "starting":
+        return "Initializing monitor"
+    if raw_status == "fetching":
+        return "Fetching latest frame"
+    if raw_status == "processing":
+        return "Analyzing latest frame"
+    if raw_status == "fetch_error":
+        return "Camera feed unavailable"
+    if raw_status == "alerting":
+        if emergency_type:
+            return f"{emergency_type} detected"
+        if severity:
+            return f"{severity} incident detected"
+        return "Active incident detected"
+    if raw_status == "blocked":
+        return "Frame blocked by guardrail"
+    if raw_status == "error":
+        return "Backend attention required"
+    if raw_status == "offline":
+        return "Backend offline"
+    if raw_status == "monitoring":
+        return "Monitoring live traffic conditions"
+    if image_available:
+        return "Feed ready for monitoring"
+    return status_label or "Status unavailable"
+
+
+def _humanize_phrase(value: Any) -> str:
+    normalized = str(value or "").strip().replace("_", " ")
+    if not normalized:
+        return ""
+    return normalized[0].upper() + normalized[1:]
+
+
+def _build_status_history(
+    runtime_state: dict[str, Any],
+    *,
+    fallback_message: str,
+) -> list[dict[str, Any]]:
+    history = _format_history_entries(
+        runtime_state.get("status_history"),
+        value_key="message",
+        fallback_value=fallback_message,
+        fallback_timestamp=_parse_timestamp(runtime_state.get("heartbeat_at")),
+        runtime_state=runtime_state,
+    )
+    return _mark_current_entry(history)
+
+
+def _build_analysis_history(
+    runtime_state: dict[str, Any],
+    *,
+    fallback_summary: str,
+    fallback_timestamp: datetime | None,
+) -> list[dict[str, Any]]:
+    validated_text = str(runtime_state.get("validated_text", "")).strip()
+    history = _format_history_entries(
+        runtime_state.get("analysis_history"),
+        value_key="summary",
+        fallback_value=fallback_summary if validated_text or fallback_timestamp is not None else "",
+        fallback_timestamp=fallback_timestamp,
+        runtime_state=runtime_state,
+    )
+    return _mark_current_entry(history)
+
+
+def _format_history_entries(
+    raw_history: Any,
+    *,
+    value_key: str,
+    fallback_value: str,
+    fallback_timestamp: datetime | None,
+    runtime_state: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    if isinstance(raw_history, list):
+        for item in raw_history:
+            if not isinstance(item, dict):
+                continue
+            value = str(item.get(value_key, "")).strip()
+            if not value:
+                continue
+            timestamp = _parse_timestamp(item.get("timestamp"))
+            backend_status = str(item.get("backend_status", "")).strip().lower()
+            entry: dict[str, Any] = {
+                "timestamp": _format_datetime(timestamp) if timestamp else "Recent",
+                "timestamp_iso": timestamp.isoformat() if timestamp else "",
+                "backend_status": backend_status,
+                value_key: value,
+            }
+            if backend_status:
+                entry["label"] = _status_label_for_log(backend_status)
+            severity = str(item.get("severity", "")).strip().lower()
+            emergency_type = str(item.get("emergency_type", "")).strip()
+            if severity:
+                entry["severity"] = severity
+            if emergency_type:
+                entry["emergency_type"] = emergency_type
+            entries.append(entry)
+
+    if entries or not fallback_value.strip():
+        return entries
+
+    fallback_status = str(runtime_state.get("backend_status", "")).strip().lower() if runtime_state else ""
+    fallback_entry: dict[str, Any] = {
+        "timestamp": _format_datetime(fallback_timestamp) if fallback_timestamp else "Recent",
+        "timestamp_iso": fallback_timestamp.isoformat() if fallback_timestamp else "",
+        "backend_status": fallback_status,
+        value_key: fallback_value.strip(),
+    }
+    if fallback_status:
+        fallback_entry["label"] = _status_label_for_log(fallback_status)
+    return [fallback_entry]
+
+
+def _mark_current_entry(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not entries:
+        return []
+
+    marked: list[dict[str, Any]] = []
+    last_index = len(entries) - 1
+    for index, entry in enumerate(entries):
+        marked.append({**entry, "is_current": index == last_index})
+    return marked
+
+
+def _status_label_for_log(raw_status: str) -> str:
+    normalized = str(raw_status).strip().lower()
+    labels = {
+        "starting": "Starting",
+        "fetching": "Fetching",
+        "processing": "Processing",
+        "fetch_error": "Feed Fault",
+        "alerting": "Alerting",
+        "blocked": "Blocked",
+        "error": "Fault",
+        "offline": "Offline",
+        "monitoring": "Monitoring",
+    }
+    return labels.get(normalized, normalized.replace("_", " ").title() or "Update")
 
 
 def _is_stale(runtime_state: dict[str, Any]) -> bool:

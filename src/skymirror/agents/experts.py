@@ -340,7 +340,8 @@ def _run_hybrid_expert(category: str, spec: ExpertSpec, state: SkymirrorState, r
     metadata = {
         "namespace": spec.namespace,
         "rag_triggered": False,
-        "retrieved_context_count": 0
+        "retrieved_context_count": 0,
+        "rag_error": "",
     }
 
     # Step 2: Determine if RAG fallback is necessary
@@ -353,31 +354,39 @@ def _run_hybrid_expert(category: str, spec: ExpertSpec, state: SkymirrorState, r
 
     if needs_fallback:
         logger.info("%s: Rule-based confidence low/empty. Triggering RAG fallback.", spec.name)
-        config = _load_expert_model_config()
-        retriever = get_pinecone_retriever(namespace=spec.namespace, top_k=config["top_k"])
-        documents = retriever.invoke(text)
-        metadata["retrieved_context_count"] = len(documents)
+        try:
+            config = _load_expert_model_config()
+            retriever = get_pinecone_retriever(namespace=spec.namespace, top_k=config["top_k"])
+            documents = retriever.invoke(text)
+            metadata["retrieved_context_count"] = len(documents)
 
-        if documents:
-            assessment = _invoke_expert_llm(spec, text, documents)
-            metadata["rag_triggered"] = True
-            
-            # Step 3: Inject LLM Assessment back into the standard Scenario structure
-            if assessment.findings and assessment.severity != "low":
-                llm_scenario: ExpertScenario = {
-                    "name": f"llm_inferred_{category}_issue",
-                    "severity": assessment.severity, # LLM dictates severity
-                    "confidence": "medium",          # RAG fallback defaults to medium confidence
-                    "reason": assessment.summary,
-                    "evidence": assessment.findings + [f"RAG Citations: {len(assessment.citations)}"],
-                    "impact_scope": "local",         # Default scope
-                    "persistence": "new",            # Default persistence
-                    "recommended_actions": [assessment.recommended_action] if assessment.recommended_action else []
-                }
-                scenarios.append(llm_scenario)
-                # Rebuild the final result payload
-                rule_result = _build_result(category, scenarios)
-                rule_result["llm_raw_assessment"] = assessment.model_dump() # Attach raw JSON for debugging
+            if documents:
+                assessment = _invoke_expert_llm(spec, text, documents)
+                metadata["rag_triggered"] = True
+
+                # Step 3: Inject LLM Assessment back into the standard Scenario structure
+                if assessment.findings and assessment.severity != "low":
+                    llm_scenario: ExpertScenario = {
+                        "name": f"llm_inferred_{category}_issue",
+                        "severity": assessment.severity,  # LLM dictates severity
+                        "confidence": "medium",  # RAG fallback defaults to medium confidence
+                        "reason": assessment.summary,
+                        "evidence": assessment.findings + [f"RAG Citations: {len(assessment.citations)}"],
+                        "impact_scope": "local",  # Default scope
+                        "persistence": "new",  # Default persistence
+                        "recommended_actions": [assessment.recommended_action] if assessment.recommended_action else [],
+                    }
+                    scenarios.append(llm_scenario)
+                    # Rebuild the final result payload
+                    rule_result = _build_result(category, scenarios)
+                    rule_result["llm_raw_assessment"] = assessment.model_dump()  # Attach raw JSON for debugging
+        except Exception as exc:
+            metadata["rag_error"] = str(exc)
+            logger.warning(
+                "%s: RAG fallback unavailable; continuing with rule-based result: %s",
+                spec.name,
+                exc,
+            )
 
     return {
         "expert_results": {

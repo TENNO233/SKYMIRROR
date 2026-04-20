@@ -19,6 +19,44 @@ const elements = {
   reportDetail: document.getElementById("reportDetail"),
   monitorTemplate: document.getElementById("monitorTemplate"),
 };
+const DASHBOARD_POLL_INTERVAL_MS = 1000;
+
+const AGENT_LABEL_MAP = {
+  image_guardrail: {
+    label: "Guardrail",
+  },
+  vlm_agent: {
+    label: "VLM",
+  },
+  validator_agent: {
+    label: "Validator",
+  },
+  orchestrator_agent: {
+    label: "Orchestrator",
+  },
+  order_expert: {
+    label: "Order Expert",
+  },
+  safety_expert: {
+    label: "Safety Expert",
+  },
+  environment_expert: {
+    label: "Environment Expert",
+  },
+  alert_manager: {
+    label: "Alert Manager",
+  },
+};
+const AGENT_STATUS_ORDER = [
+  "image_guardrail",
+  "vlm_agent",
+  "validator_agent",
+  "orchestrator_agent",
+  "order_expert",
+  "safety_expert",
+  "environment_expert",
+  "alert_manager",
+];
 
 async function bootstrap() {
   bindEvents();
@@ -27,7 +65,7 @@ async function bootstrap() {
 
   window.setInterval(() => {
     loadDashboard({ silent: true });
-  }, 5000);
+  }, DASHBOARD_POLL_INTERVAL_MS);
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
@@ -167,15 +205,26 @@ function populateMonitorCard(node, camera, monitorIndex, allCameras) {
   chip.className = "status-chip";
   chip.textContent = camera.status_label;
   chip.classList.add(`is-${camera.status_level}`);
+  node.querySelector(".agent-trace-strip").replaceChildren(...buildAgentStatusPills(camera));
 
   node.querySelector(".monitor-timestamp").textContent = `Analysis ${camera.last_analysis_at}`;
   node.querySelector(".incident-line").textContent = camera.status_summary_text;
-  node.querySelector(".status-detail").textContent = camera.status_detail;
   node.querySelector(".road-type").textContent = camera.road_type;
   node.querySelector(".dispatch-state").textContent = formatDispatch(camera);
   node.querySelector(".analysis-time").textContent = camera.last_analysis_at;
   node.querySelector(".alert-type").textContent = formatAlertType(camera);
-  node.querySelector(".summary-text").textContent = camera.analysis_summary_text;
+  renderLog(
+    node.querySelector(".status-log"),
+    camera.status_history,
+    buildStatusLogEntry,
+    "No status events have been logged for this camera yet.",
+  );
+  renderLog(
+    node.querySelector(".summary-log"),
+    camera.analysis_history,
+    buildAnalysisLogEntry,
+    "No completed analysis has been logged for this camera yet.",
+  );
   node.querySelector(".image-source").textContent = formatImageSource(camera.image_source);
   node.querySelector(".frame-timestamp").textContent = camera.last_frame_at;
   node.querySelector(".site-name").textContent = camera.location_description;
@@ -194,7 +243,6 @@ function populateMonitorCard(node, camera, monitorIndex, allCameras) {
   renderMonitorImage(image, placeholder, placeholderTitle, placeholderDetail, camera);
 
   node.querySelector(".signal-strip").replaceChildren(...buildSignalPills(camera));
-  node.querySelector(".expert-strip").replaceChildren(...buildExpertPills(camera));
   const cameraListPanel = node.querySelector(".camera-list-panel");
   cameraListPanel.hidden = !isSwitcherOpen;
   node.querySelector(".camera-list").replaceChildren(
@@ -300,14 +348,98 @@ function buildSignalPills(camera) {
   });
 }
 
-function buildExpertPills(camera) {
-  const experts = camera.active_experts?.length ? camera.active_experts : ["No active expert routing"];
-  return experts.map((expert) => {
-    const pill = document.createElement("span");
-    pill.className = "expert-pill";
-    pill.textContent = expert;
-    return pill;
+function buildAgentStatusPills(camera) {
+  const activeAgents = new Set(
+    Array.isArray(camera.current_agents) ? camera.current_agents.filter(Boolean) : [],
+  );
+
+  return AGENT_STATUS_ORDER.map((agentName) => {
+    const metadata = AGENT_LABEL_MAP[agentName] ?? {
+      label: formatBackendStatus(agentName),
+    };
+    const item = document.createElement("span");
+    item.className = "agent-status-pill";
+    item.dataset.agent = agentName;
+    if (activeAgents.has(agentName)) {
+      item.classList.add("is-active");
+    }
+    item.setAttribute("aria-label", metadata.label);
+    item.title = metadata.label;
+    item.innerHTML = `
+      <span class="agent-status-light" aria-hidden="true"></span>
+      <span class="agent-status-text">${escapeHtml(metadata.label)}</span>
+    `;
+    return item;
   });
+}
+
+function renderLog(container, entries, buildEntry, emptyMessage) {
+  const items = Array.isArray(entries) ? entries : [];
+  const shouldStickToBottom =
+    !container.dataset.hasRendered ||
+    container.scrollHeight - container.scrollTop - container.clientHeight <= 24;
+  const previousScrollTop = container.scrollTop;
+
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "log-empty";
+    empty.textContent = emptyMessage;
+    container.replaceChildren(empty);
+  } else {
+    container.replaceChildren(...items.map((entry, index) => buildEntry(entry, index === items.length - 1)));
+  }
+
+  container.dataset.hasRendered = "true";
+  if (shouldStickToBottom) {
+    container.scrollTop = container.scrollHeight;
+    return;
+  }
+
+  const maxScrollTop = Math.max(container.scrollHeight - container.clientHeight, 0);
+  container.scrollTop = Math.min(previousScrollTop, maxScrollTop);
+}
+
+function buildStatusLogEntry(entry, isLatest) {
+  const item = document.createElement("article");
+  item.className = "log-entry";
+  if (isLatest || entry.is_current) {
+    item.classList.add("is-current");
+  }
+
+  const label = entry.label || formatBackendStatus(entry.backend_status);
+  item.innerHTML = `
+    <div class="log-entry-meta">
+      <span class="log-entry-label">${escapeHtml(label)}</span>
+      <time>${escapeHtml(entry.timestamp || "Recent")}</time>
+    </div>
+    <p>${escapeHtml(entry.message || "")}</p>
+  `;
+  return item;
+}
+
+function buildAnalysisLogEntry(entry, isLatest) {
+  const item = document.createElement("article");
+  item.className = "log-entry";
+  if (isLatest || entry.is_current) {
+    item.classList.add("is-current");
+  }
+
+  const tags = [];
+  if (entry.severity) {
+    tags.push(`<span class="log-entry-tag">${escapeHtml(entry.severity.toUpperCase())}</span>`);
+  }
+  if (entry.emergency_type) {
+    tags.push(`<span class="log-entry-tag">${escapeHtml(entry.emergency_type)}</span>`);
+  }
+
+  item.innerHTML = `
+    <div class="log-entry-meta">
+      <time>${escapeHtml(entry.timestamp || "Recent")}</time>
+      <div class="log-entry-tags">${tags.join("")}</div>
+    </div>
+    <p>${escapeHtml(entry.summary || "")}</p>
+  `;
+  return item;
 }
 
 function buildCameraButtons(allCameras, selectedCameraId, monitorIndex) {
@@ -709,6 +841,17 @@ function formatPlaceholderCopy(camera) {
 
 function booleanLabel(value) {
   return value ? "YES" : "NO";
+}
+
+function formatBackendStatus(value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    return "Update";
+  }
+  return normalized
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function formatShortTimestamp(isoValue) {

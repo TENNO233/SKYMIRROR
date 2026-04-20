@@ -37,8 +37,8 @@ _SUPPORTED_MEDIA_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
 
 _VLM_USER_PROMPT = (
     "Return one JSON object with exactly these top-level fields:\n"
-    "- summary: 1 to 3 sentences describing the traffic scene using only directly visible facts.\n"
-    "- direct_observations: 4 to 10 short atomic observations.\n"
+    "- summary: 1 to 3 sentences describing the traffic operating condition using only directly visible facts. Focus on traffic flow, stopped vehicles, lane blockage, visible violations, conflict cues, or roadway hazards rather than general picture description.\n"
+    "- direct_observations: 4 to 10 short atomic observations. Prefer observations that would help a government traffic operations team assess enforcement, safety, congestion, or maintenance relevance.\n"
     "- road_features: visible roadway layout or markings such as intersection, junction, crosswalk, stop line, shoulder, lane arrows, bus lane, median, yellow box junction.\n"
     "- traffic_controls: visible signals or signs such as red traffic light, green traffic light, turn arrow, pedestrian signal, overhead sign.\n"
     "- notable_hazards: directly visible hazards or disruptions such as standing water, debris, blocked lane, collision damage, poor visibility.\n"
@@ -47,6 +47,11 @@ _VLM_USER_PROMPT = (
     "  water_present, construction_present, obstacle_present, low_visibility,\n"
     "  lighting_abnormal, wrong_way_cue, collision_cue, dangerous_crossing_cue,\n"
     "  conflict_risk_cue.\n\n"
+    "Observation priorities:\n"
+    "- Note where vehicles are stationary, queueing, obstructing lanes, or moving unusually.\n"
+    "- Call out directly visible traffic-control context linked to the scene, such as signal color, turn arrows, or stop lines.\n"
+    "- Include visible evidence of conflict, collision, wrong-way movement, hazardous crossing, flooding, debris, smoke, construction, or poor visibility when present.\n"
+    "- If traffic appears normal, say so explicitly in operational terms.\n\n"
     "Signal guidance:\n"
     "- Count only clearly visible vehicles.\n"
     "- stopped_vehicle_count counts vehicles clearly stationary in the frame.\n"
