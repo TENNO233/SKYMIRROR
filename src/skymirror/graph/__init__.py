@@ -1,7 +1,9 @@
 """
 Graph package exports.
 
-`app` is imported lazily so modules that only need state types do not require
+`app` is the unified Studio/runtime graph with both frame and report paths.
+
+Exports are lazy so modules that only need state types do not require
 LangGraph to be imported at package-import time.
 """
 
@@ -15,7 +17,7 @@ __all__ = ["app", "SkymirrorState"]
 
 
 def __getattr__(name: str) -> Any:
-    """Lazily expose the compiled LangGraph application."""
+    """Lazily expose compiled LangGraph applications."""
     if name == "app":
         from skymirror.graph.graph import app
 

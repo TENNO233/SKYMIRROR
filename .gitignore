@@ -52,9 +52,20 @@ data/frames/*
 data/logs/*
 !data/logs/.gitkeep
 
+# Dashboard runtime state and logs
+data/dashboard/
+
+# Generated alert payloads and dispatch logs
+data/alerts/
+
 # Generated PDF / HTML reports
 data/reports/*
 !data/reports/.gitkeep
+
+# LangGraph Studio / local graph artifacts
+.langgraph_api/
+data/langgraph/
+data/graph/
 
 # Local vector DB (Chroma, FAISS, etc.) — never commit index files
 data/local_vector_db/*
@@ -79,3 +90,10 @@ Desktop.ini
 .idea/
 *.swp
 *.swo
+
+# Daily Explication Report runtime outputs
+data/oa_log/
+data/reports/
+
+# Local virtualenv
+.venv/

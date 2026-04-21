@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "skymirror": "./src/skymirror/graph/graph.py:app"
+  },
+  "env": "./.env"
+}

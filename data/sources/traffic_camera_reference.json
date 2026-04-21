@@ -1,0 +1,62 @@
+[
+  {
+    "camera_id": "1703",
+    "road_type": "Expressway",
+    "location_description": "View from Yio Chu Kang Flyover",
+    "area_or_key_landmark": "CTE (Near Ang Mo Kio/Yio Chu Kang)"
+  },
+  {
+    "camera_id": "2701",
+    "road_type": "Expressway",
+    "location_description": "View from Woodlands Checkpoint (Towards BKE)",
+    "area_or_key_landmark": "BKE (Woodlands Checkpoint Entrance)"
+  },
+  {
+    "camera_id": "1502",
+    "road_type": "Expressway",
+    "location_description": "View from Benjamin Sheares Bridge",
+    "area_or_key_landmark": "ECP (Overlooking Marina Bay)"
+  },
+  {
+    "camera_id": "1505",
+    "road_type": "Expressway",
+    "location_description": "View from Marina Boulevard / Marina Coastal Drive",
+    "area_or_key_landmark": "MCE (Exit to Marina Bay Financial Centre)"
+  },
+  {
+    "camera_id": "4703",
+    "road_type": "Arterial/Link",
+    "location_description": "View from Sentosa Gateway (Towards Sentosa)",
+    "area_or_key_landmark": "Sentosa Gateway (Entrance to Sentosa)"
+  },
+  {
+    "camera_id": "1507",
+    "road_type": "City Road",
+    "location_description": "Nicoll Highway",
+    "area_or_key_landmark": "Near Suntec City"
+  },
+  {
+    "camera_id": "1508",
+    "road_type": "City Road",
+    "location_description": "Grange Road / Orchard Road",
+    "area_or_key_landmark": "Orchard Road Shopping Belt"
+  },
+  {
+    "camera_id": "1509",
+    "road_type": "City Road",
+    "location_description": "Esplanade Drive",
+    "area_or_key_landmark": "Near The Esplanade / Merlion Park"
+  },
+  {
+    "camera_id": "1510",
+    "road_type": "City Road",
+    "location_description": "Paterson Road / Orchard Road",
+    "area_or_key_landmark": "Junction near ION Orchard"
+  },
+  {
+    "camera_id": "1511",
+    "road_type": "City Road",
+    "location_description": "Bras Basah Road",
+    "area_or_key_landmark": "Near Raffles City"
+  }
+]
