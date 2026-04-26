@@ -50,9 +50,13 @@ _VLM_USER_PROMPT = (
     "Return one JSON object with exactly these top-level fields:\n"
     "- summary: 1 to 3 sentences describing the traffic scene using only directly visible facts.\n"
     "- direct_observations: 4 to 10 short atomic observations.\n"
-    "- road_features: visible roadway layout or markings such as intersection, junction, crosswalk, stop line, shoulder, lane arrows, bus lane, median, yellow box junction.\n"
-    "- traffic_controls: visible signals or signs such as red traffic light, green traffic light, turn arrow, pedestrian signal, overhead sign.\n"
-    "- notable_hazards: directly visible hazards or disruptions such as standing water, debris, blocked lane, collision damage, poor visibility.\n"
+    "- road_features: visible roadway layout or markings such as intersection, "
+    "junction, crosswalk, stop line, shoulder, lane arrows, bus lane, median, "
+    "yellow box junction.\n"
+    "- traffic_controls: visible signals or signs such as red traffic light, green "
+    "traffic light, turn arrow, pedestrian signal, overhead sign.\n"
+    "- notable_hazards: directly visible hazards or disruptions such as standing "
+    "water, debris, blocked lane, collision damage, poor visibility.\n"
     "- signals: object with these exact fields and conservative values only:\n"
     "  vehicle_count, stopped_vehicle_count, pedestrian_present, blocked_lanes, queueing,\n"
     "  water_present, construction_present, obstacle_present, low_visibility,\n"
@@ -258,7 +262,9 @@ def _coerce_scene_report(value: Any) -> VlmSceneReport:
     return coerce_model(value, VlmSceneReport)
 
 
-def _classify_image_safety(image: ImagePayload, config: OpenAIGuardrailConfig) -> GuardrailAssessment:
+def _classify_image_safety(
+    image: ImagePayload, config: OpenAIGuardrailConfig
+) -> GuardrailAssessment:
     llm = build_openai_chat_model(
         temperature=config.temperature,
         model=config.model,

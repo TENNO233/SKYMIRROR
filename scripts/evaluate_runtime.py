@@ -87,9 +87,7 @@ def evaluate_runtime(fixtures_dir: Path) -> dict[str, Any]:
         record for record in records if record.get("status") in {"clean", "alerted"}
     ]
     validator_failures = sum(
-        1
-        for record in validator_candidates
-        if not str(record.get("validated_text", "")).strip()
+        1 for record in validator_candidates if not str(record.get("validated_text", "")).strip()
     )
     validator_regression_rate = (
         validator_failures / len(validator_candidates) if validator_candidates else 0.0
@@ -111,9 +109,7 @@ def evaluate_runtime(fixtures_dir: Path) -> dict[str, Any]:
             total_alerts += 1
             if alert.get("evidence") is not None and alert.get("regulations") is not None:
                 evidence_complete += 1
-    alert_evidence_completeness_rate = (
-        evidence_complete / total_alerts if total_alerts else 1.0
-    )
+    alert_evidence_completeness_rate = evidence_complete / total_alerts if total_alerts else 1.0
 
     with tempfile.TemporaryDirectory() as temp_dir:
         tmp_root = Path(temp_dir)
@@ -154,13 +150,19 @@ def evaluate_runtime(fixtures_dir: Path) -> dict[str, Any]:
         for name, value in metrics.items()
         if float(value) < float(threshold_values.get(name, value))
         and name.endswith("_rate")
-        and name in {"schema_valid_rate", "alert_evidence_completeness_rate", "report_generation_success_rate"}
+        and name
+        in {
+            "schema_valid_rate",
+            "alert_evidence_completeness_rate",
+            "report_generation_success_rate",
+        }
     ]
     failures.extend(
         name
         for name, value in metrics.items()
         if float(value) > float(threshold_values.get(name, value))
-        and name in {
+        and name
+        in {
             "guardrail_regression_rate",
             "validator_regression_rate",
             "expert_routing_regression_rate",

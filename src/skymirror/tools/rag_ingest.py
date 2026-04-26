@@ -110,7 +110,9 @@ def ingest_namespace(
     clear_first: bool = False,
 ) -> int:
     files = sorted(
-        path for path in source_dir.rglob("*") if path.is_file() and path.suffix.lower() in _SUPPORTED_SUFFIXES
+        path
+        for path in source_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in _SUPPORTED_SUFFIXES
     )
     if not files:
         logger.warning("ingest_namespace: No supported files found in %s", source_dir)
@@ -159,7 +161,9 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
     args = _parse_args()
     chunk_size = _read_int_env("RAG_CHUNK_SIZE", _DEFAULT_CHUNK_SIZE)
     overlap = _read_int_env("RAG_CHUNK_OVERLAP", _DEFAULT_CHUNK_OVERLAP)

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import shutil
+from pathlib import Path
 from uuid import uuid4
 
 from skymirror.dashboard.data import (
@@ -46,7 +46,9 @@ def _build_paths(tmp_path: Path) -> DashboardPaths:
             "area_or_key_landmark": "BKE (Woodlands Checkpoint Entrance)",
         },
     ]
-    (sources_dir / "traffic_camera_reference.json").write_text(json.dumps(reference), encoding="utf-8")
+    (sources_dir / "traffic_camera_reference.json").write_text(
+        json.dumps(reference), encoding="utf-8"
+    )
 
     return DashboardPaths(
         project_root=tmp_path,
@@ -109,7 +111,10 @@ def test_build_dashboard_payload_uses_only_guardrail_approved_frames() -> None:
 
         payload = build_dashboard_payload(
             paths,
-            live_images={"1703": "https://example.test/1703.jpg", "2701": "https://example.test/2701.jpg"},
+            live_images={
+                "1703": "https://example.test/1703.jpg",
+                "2701": "https://example.test/2701.jpg",
+            },
         )
 
         assert payload["default_monitor_ids"] == ["2701"]
@@ -138,7 +143,10 @@ def test_build_dashboard_payload_uses_only_guardrail_approved_frames() -> None:
             "environment_expert",
             "alert_manager",
         ]
-        assert first["langsmith_trace_url"] == "https://smith.langchain.com/o/test/projects/p/test/r/abc123?poll=true"
+        assert (
+            first["langsmith_trace_url"]
+            == "https://smith.langchain.com/o/test/projects/p/test/r/abc123?poll=true"
+        )
         assert first["summary_text"] == "Vehicle collision with blockage."
 
         assert second["camera_id"] == "2701"
@@ -176,7 +184,10 @@ def test_build_dashboard_payload_holds_unapproved_frame_off_monitor() -> None:
         assert camera["last_frame_at"] == "Awaiting approved frame"
         assert camera["status_label"] == "Processing"
         assert camera["status_summary_text"] == "Analyzing latest frame"
-        assert camera["analysis_summary_text"] == "No completed analysis has been published for this camera yet."
+        assert (
+            camera["analysis_summary_text"]
+            == "No completed analysis has been published for this camera yet."
+        )
         assert camera["analysis_history"] == []
         assert camera["current_agents"] == []
         assert camera["active_agents"] == []

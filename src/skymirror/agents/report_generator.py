@@ -40,6 +40,7 @@ Entry points
 - `python -m skymirror.agents.report_generator [--date ...]`
     CLI for demos and manual runs.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -51,14 +52,13 @@ from typing import Any
 
 from langsmith import traceable
 
-from skymirror.tools.llm_factory import narrate
-from skymirror.tools.daily_report.loader import load_oa_log, yesterday_sgt
 from skymirror.tools.daily_report.analysis import (
     compute_overview_stats,
     compute_system_profile_stats,
     compute_temporal_stats,
     select_representative_cases,
 )
+from skymirror.tools.daily_report.loader import load_oa_log, yesterday_sgt
 from skymirror.tools.daily_report.rendering import (
     build_recommendations_prompt,
     build_system_profile_prompt,
@@ -72,6 +72,7 @@ from skymirror.tools.daily_report.rendering import (
     render_temporal_section,
 )
 from skymirror.tools.langsmith_utils import flush_langsmith_traces
+from skymirror.tools.llm_factory import narrate
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,9 @@ def _alerted_runs(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _trace_generate_report_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
     target_date = inputs.get("target_date")
     return {
-        "target_date": target_date.isoformat() if hasattr(target_date, "isoformat") else str(target_date),
+        "target_date": target_date.isoformat()
+        if hasattr(target_date, "isoformat")
+        else str(target_date),
         "oa_log_dir": str(inputs.get("oa_log_dir", "")),
         "output_dir": str(inputs.get("output_dir", "")),
     }
@@ -102,6 +105,7 @@ def _trace_generate_report_output(output: Path) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Core orchestrator
 # ---------------------------------------------------------------------------
+
 
 @traceable(
     name="generate_report",
@@ -127,7 +131,7 @@ def generate_report(
 
     if not records:
         # Case A or B: no log file or empty log file.
-        stem = (oa_log_dir / f"{target_date.isoformat()}.jsonl")
+        stem = oa_log_dir / f"{target_date.isoformat()}.jsonl"
         label = "A" if not stem.exists() else "B"
         md = render_empty_day_report(target_date, case_label=label)
     elif not triggered:
@@ -182,30 +186,33 @@ def _render_full_report(
 
     jsonl_rel = f"data/oa_log/{target_date.isoformat()}.jsonl"
 
-    return "\n".join([
-        f"# SKYMIRROR Daily Report — {target_date.isoformat()}",
-        "",
-        render_overview_section(overview),
-        "## 2. Executive Summary",
-        "",
-        tldr,
-        "",
-        render_temporal_section(temporal, narration=temporal_narration),
-        "## 4. Representative Case Explications",
-        "",
-        case_md,
-        render_system_profile_section(profile, narration=profile_narration),
-        "## 6. Recommendations",
-        "",
-        recs_narration,
-        "",
-        render_appendix_section(triggered, featured_ids, jsonl_path=jsonl_rel),
-    ])
+    return "\n".join(
+        [
+            f"# SKYMIRROR Daily Report — {target_date.isoformat()}",
+            "",
+            render_overview_section(overview),
+            "## 2. Executive Summary",
+            "",
+            tldr,
+            "",
+            render_temporal_section(temporal, narration=temporal_narration),
+            "## 4. Representative Case Explications",
+            "",
+            case_md,
+            render_system_profile_section(profile, narration=profile_narration),
+            "## 6. Recommendations",
+            "",
+            recs_narration,
+            "",
+            render_appendix_section(triggered, featured_ids, jsonl_path=jsonl_rel),
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
 # Legacy wrapper — preserves main.py's existing APScheduler import
 # ---------------------------------------------------------------------------
+
 
 def generate_daily_report(
     oa_log_dir: Path | str = "data/oa_log",
@@ -222,6 +229,7 @@ def generate_daily_report(
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
+
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(

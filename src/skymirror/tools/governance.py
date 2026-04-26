@@ -136,7 +136,9 @@ def lta_enabled(policy: dict[str, Any] | None = None) -> bool:
     return value in _TRUTHY
 
 
-def model_allowed(model_name: str, *, capability: str, policy: dict[str, Any] | None = None) -> bool:
+def model_allowed(
+    model_name: str, *, capability: str, policy: dict[str, Any] | None = None
+) -> bool:
     active = policy or load_policy()
     models = dict(active.get("allowed_models") or {})
     allowed_models = models.get(capability) or []
@@ -192,4 +194,3 @@ def validate_input_length(text: str, *, field: str, policy: dict[str, Any] | Non
             f"Input field '{field}' exceeds policy limit "
             f"({len(text)} chars > {limit} chars allowed)."
         )
-

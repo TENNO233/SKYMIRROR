@@ -21,6 +21,7 @@ Both passes apply hard code-level filters on the LLM's output:
   • Evaluate pass strips any expert names; falls back to "alert_manager".
 This prevents mode-violating LLM responses from creating routing cycles.
 """
+
 from __future__ import annotations
 
 import json
@@ -36,20 +37,19 @@ from skymirror.agents.prompts import (
     PROMPT_VERSION,
 )
 from skymirror.graph.state import SkymirrorState
-from skymirror.tools.governance import model_allowed, policy_version
 from skymirror.tools import llm_factory
+from skymirror.tools.governance import model_allowed, policy_version
 
 logger = logging.getLogger(__name__)
 
-_EXPERT_NODES: frozenset[str] = frozenset(
-    {"order_expert", "safety_expert", "environment_expert"}
-)
+_EXPERT_NODES: frozenset[str] = frozenset({"order_expert", "safety_expert", "environment_expert"})
 _ALL_EXPERTS: list[str] = sorted(_EXPERT_NODES)  # deterministic order
 
 
 # ---------------------------------------------------------------------------
 # Structured output schema
 # ---------------------------------------------------------------------------
+
 
 class OrchestratorDecision(BaseModel):
     """LLM-structured routing decision from the Orchestrator."""
@@ -77,6 +77,7 @@ class OrchestratorDecision(BaseModel):
 # ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
+
 
 def _build_dispatch_prompt(
     validated_scene: dict[str, Any],
@@ -123,6 +124,7 @@ def _build_evaluate_prompt(expert_results: dict[str, Any]) -> str:
 # LLM invocation
 # ---------------------------------------------------------------------------
 
+
 def _invoke_orchestrator_llm(state: SkymirrorState) -> OrchestratorDecision:
     from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -153,6 +155,7 @@ def _invoke_orchestrator_llm(state: SkymirrorState) -> OrchestratorDecision:
 # ---------------------------------------------------------------------------
 # Node function
 # ---------------------------------------------------------------------------
+
 
 def orchestrator_node(state: SkymirrorState) -> dict[str, Any]:
     """

@@ -77,7 +77,8 @@ def test_validator_agent_node_cross_checks_single_output(monkeypatch: pytest.Mon
 
     assert result["validated_text"] == (
         "Scene assessment: Two cars are stopped at a junction with clear lane markings. "
-        "Government relevance: no immediate enforcement, safety, or maintenance action is indicated; routine monitoring is sufficient."
+        "Government relevance: no immediate enforcement, safety, or maintenance action "
+        "is indicated; routine monitoring is sufficient."
     )
     assert result["validated_signals"]["vehicle_count"] == 2
     assert result["validated_scene"]["road_features"] == ["junction", "lane markings"]
@@ -105,8 +106,10 @@ def test_validated_text_from_report_uses_surveillance_brief_for_incident() -> No
     )
 
     assert summary == (
-        "Scene assessment: Collision damage is visible across two lanes; at least 2 blocked lanes are visible. "
-        "Government relevance: immediate safety review is warranted, and traffic management attention is warranted because lane capacity appears reduced."
+        "Scene assessment: Collision damage is visible across two lanes; at least 2 "
+        "blocked lanes are visible. "
+        "Government relevance: immediate safety review is warranted, and traffic "
+        "management attention is warranted because lane capacity appears reduced."
     )
 
 
@@ -127,7 +130,8 @@ def test_validated_text_from_report_uses_surveillance_brief_for_clear_scene() ->
 
     assert summary == (
         "Scene assessment: Traffic is moving steadily through the monitored junction. "
-        "Government relevance: no immediate enforcement, safety, or maintenance action is indicated; routine monitoring is sufficient."
+        "Government relevance: no immediate enforcement, safety, or maintenance action "
+        "is indicated; routine monitoring is sufficient."
     )
 
 

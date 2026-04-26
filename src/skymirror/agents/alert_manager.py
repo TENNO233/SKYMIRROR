@@ -13,6 +13,7 @@ Run directly for smoke-testing against fixture JSON:
 
     python -m skymirror.agents.alert_manager --fixture single_expert
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,12 +27,12 @@ from typing import Any
 
 from skymirror.agents.prompts import ALERT_CLASSIFICATION_PROMPT_ID, PROMPT_VERSION
 from skymirror.graph.state import SkymirrorState
-from skymirror.tools.governance import lta_enabled, policy_version
 from skymirror.tools.alert.classification import classify
 from skymirror.tools.alert.constants import DOMAIN_MAP
 from skymirror.tools.alert.dispatcher import dispatch
 from skymirror.tools.alert.lta_lookup import lookup_lta_events
 from skymirror.tools.alert.rendering import render_alert
+from skymirror.tools.governance import lta_enabled, policy_version
 
 logger = logging.getLogger(__name__)
 

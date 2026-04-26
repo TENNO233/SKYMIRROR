@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
 import json
 import logging
-from pathlib import Path
 import re
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 from time import monotonic
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -132,7 +132,7 @@ def discover_local_frames(frames_dir: Path) -> dict[str, dict[str, Any]]:
             continue
 
         camera_id = match.group("camera_id")
-        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
         current = discovered.get(camera_id)
         if current is None or priority > current["priority"] or mtime > current["timestamp"]:
             discovered[camera_id] = {
@@ -155,7 +155,9 @@ def build_dashboard_payload(
     runtime_snapshot = load_runtime_status(paths.runtime_status_path)
     runtime_lookup = runtime_snapshot.get("cameras", {})
     active_camera_ids = runtime_snapshot.get("active_camera_ids", [])
-    live_lookup = live_images if live_images is not None else fetch_live_camera_images(cache=live_cache)
+    live_lookup = (
+        live_images if live_images is not None else fetch_live_camera_images(cache=live_cache)
+    )
 
     camera_states = [
         _build_camera_state(
@@ -196,7 +198,7 @@ def list_report_history(reports_dir: Path) -> list[dict[str, Any]]:
     history: list[dict[str, Any]] = []
     for path in sorted(reports_dir.glob("*.md"), reverse=True):
         text = path.read_text(encoding="utf-8")
-        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
         history.append(
             {
                 "report_id": path.stem,
@@ -227,7 +229,7 @@ def read_report_detail(reports_dir: Path, report_id: str) -> dict[str, Any]:
         raise FileNotFoundError(report_id)
 
     text = report_path.read_text(encoding="utf-8")
-    mtime = datetime.fromtimestamp(report_path.stat().st_mtime, tz=timezone.utc)
+    mtime = datetime.fromtimestamp(report_path.stat().st_mtime, tz=UTC)
     return {
         "report_id": report_id,
         "title": _extract_report_title(text, report_id),
@@ -276,20 +278,30 @@ def _build_camera_state(
     first_alert = alerts[0] if alerts and isinstance(alerts[0], dict) else {}
     signals = runtime_state.get("validated_signals")
     signals = signals if isinstance(signals, dict) else {}
-    active_experts = [
-        str(expert).strip()
-        for expert in runtime_state.get("active_experts", [])
-        if str(expert).strip()
-    ] if isinstance(runtime_state.get("active_experts"), list) else []
-    current_agents = [
-        str(agent).strip()
-        for agent in runtime_state.get("current_agents", [])
-        if str(agent).strip()
-    ] if isinstance(runtime_state.get("current_agents"), list) else []
+    active_experts = (
+        [
+            str(expert).strip()
+            for expert in runtime_state.get("active_experts", [])
+            if str(expert).strip()
+        ]
+        if isinstance(runtime_state.get("active_experts"), list)
+        else []
+    )
+    current_agents = (
+        [
+            str(agent).strip()
+            for agent in runtime_state.get("current_agents", [])
+            if str(agent).strip()
+        ]
+        if isinstance(runtime_state.get("current_agents"), list)
+        else []
+    )
     last_frame_at = _parse_timestamp(runtime_state.get("last_frame_at")) or frame_timestamp
     last_analysis_at = _parse_timestamp(runtime_state.get("last_analysis_at"))
 
-    status_level, status_label, status_detail = _derive_runtime_status(runtime_state, bool(image_url))
+    status_level, status_label, status_detail = _derive_runtime_status(
+        runtime_state, bool(image_url)
+    )
     status_log_fallback = (
         str(runtime_state.get("status_message", "")).strip()
         or str(first_alert.get("message", "")).strip()
@@ -355,8 +367,12 @@ def _build_camera_state(
             "low_visibility": bool(signals.get("low_visibility", False)),
             "water_present": bool(signals.get("water_present", False)),
         },
-        "last_analysis_at": _format_datetime(last_analysis_at) if last_analysis_at else "No analysis yet",
-        "last_frame_at": _format_datetime(last_frame_at) if last_frame_at else _frame_status_label(image_source),
+        "last_analysis_at": _format_datetime(last_analysis_at)
+        if last_analysis_at
+        else "No analysis yet",
+        "last_frame_at": _format_datetime(last_frame_at)
+        if last_frame_at
+        else _frame_status_label(image_source),
         "frame_available": bool(image_url),
         "backend_status": str(runtime_state.get("backend_status", "")).strip(),
     }
@@ -396,7 +412,9 @@ def _derive_active_agents(
         or metadata.get("orchestrator")
         or metadata.get("alert_manager")
     )
-    orchestrator_ran = bool(active_experts or alerts or metadata.get("orchestrator") or metadata.get("alert_manager"))
+    orchestrator_ran = bool(
+        active_experts or alerts or metadata.get("orchestrator") or metadata.get("alert_manager")
+    )
 
     add("image_guardrail", enabled=guardrail_ran)
     add("vlm_agent", enabled=pipeline_progressed)
@@ -470,14 +488,20 @@ def _build_image_candidates(
     return candidates
 
 
-def _derive_runtime_status(runtime_state: dict[str, Any], image_available: bool) -> tuple[str, str, str]:
+def _derive_runtime_status(
+    runtime_state: dict[str, Any], image_available: bool
+) -> tuple[str, str, str]:
     raw_status = str(runtime_state.get("backend_status", "")).strip().lower()
     message = str(runtime_state.get("status_message", "")).strip()
 
     if _is_stale(runtime_state):
         return ("offline", "Offline", "Backend heartbeat is stale for this camera.")
     if raw_status == "starting":
-        return ("monitoring", "Starting", message or "Backend is online and waiting for the first frame.")
+        return (
+            "monitoring",
+            "Starting",
+            message or "Backend is online and waiting for the first frame.",
+        )
     if raw_status in {"fetching", "processing"}:
         return ("monitoring", "Processing", message or "Backend is processing the current frame.")
     if raw_status == "fetch_error":
@@ -493,7 +517,11 @@ def _derive_runtime_status(runtime_state: dict[str, Any], image_available: bool)
     if raw_status == "monitoring":
         return ("monitoring", "Monitoring", message or "Backend is monitoring this feed.")
     if image_available:
-        return ("monitoring", "Standby", "Feed available. No backend status has been published yet.")
+        return (
+            "monitoring",
+            "Standby",
+            "Feed available. No backend status has been published yet.",
+        )
     return ("offline", "Standby", "No backend status or live feed is currently available.")
 
 
@@ -611,7 +639,9 @@ def _format_history_entries(
     if entries or not fallback_value.strip():
         return entries
 
-    fallback_status = str(runtime_state.get("backend_status", "")).strip().lower() if runtime_state else ""
+    fallback_status = (
+        str(runtime_state.get("backend_status", "")).strip().lower() if runtime_state else ""
+    )
     fallback_entry: dict[str, Any] = {
         "timestamp": _format_datetime(fallback_timestamp) if fallback_timestamp else "Recent",
         "timestamp_iso": fallback_timestamp.isoformat() if fallback_timestamp else "",
@@ -657,7 +687,7 @@ def _is_stale(runtime_state: dict[str, Any]) -> bool:
 
     interval = _coerce_int(runtime_state.get("interval_seconds"))
     stale_after_seconds = max(45, interval * 3 if interval > 0 else 45)
-    age = datetime.now(tz=timezone.utc) - heartbeat
+    age = datetime.now(tz=UTC) - heartbeat
     return age.total_seconds() > stale_after_seconds
 
 
@@ -727,7 +757,7 @@ def _resolve_runtime_frame(frames_dir: Path, image_path: Any) -> dict[str, Any] 
     stat = resolved.stat()
     return {
         "url": f"/frames/{quote(resolved.name)}?v={int(stat.st_mtime)}",
-        "timestamp": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+        "timestamp": datetime.fromtimestamp(stat.st_mtime, tz=UTC),
     }
 
 
@@ -751,4 +781,4 @@ def _coerce_int(value: Any) -> int:
 
 
 def _now_iso() -> str:
-    return datetime.now(tz=timezone.utc).isoformat()
+    return datetime.now(tz=UTC).isoformat()

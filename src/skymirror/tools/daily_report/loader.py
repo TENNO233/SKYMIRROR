@@ -6,6 +6,7 @@ Responsible for:
 
 Used by: `skymirror.agents.report_generator`.
 """
+
 from __future__ import annotations
 
 import json
@@ -58,9 +59,7 @@ def load_oa_log(
                 validate_run_record(record)
                 records.append(record)
             except (json.JSONDecodeError, ValueError) as exc:
-                logger.warning(
-                    "Skipping malformed line %d in %s: %s", lineno, path, exc
-                )
+                logger.warning("Skipping malformed line %d in %s: %s", lineno, path, exc)
     return records
 
 

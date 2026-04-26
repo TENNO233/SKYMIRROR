@@ -4,19 +4,20 @@ Agent module exports.
 The package avoids eager imports so individual agent modules can be imported
 without pulling in optional runtime dependencies from unrelated modules.
 """
+
 from typing import Any
 
-from skymirror.agents.alert_manager import alert_manager_node
+from skymirror.agents.alert_manager import alert_manager_node, generate_alerts
 from skymirror.agents.experts import (
     environment_expert_node,
     order_expert_node,
     safety_expert_node,
 )
 from skymirror.agents.validator import validator_agent_node
-from skymirror.agents.alert_manager import generate_alerts
 from skymirror.agents.vlm_agent import image_guardrail_node, vlm_agent_node
 
 __all__ = [
+    "alert_manager_node",
     "image_guardrail_node",
     "vlm_agent_node",
     "validator_agent_node",

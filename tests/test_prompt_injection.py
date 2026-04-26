@@ -47,6 +47,7 @@ _CLEAN_METADATA = {
 #    exfiltrate data or alter its output.
 # ===========================================================================
 
+
 class TestImageSourceValidation:
     def test_gov_sg_api_domain_passes(self):
         validate_image_source("https://api.data.gov.sg/v1/transport/traffic-images")
@@ -87,23 +88,30 @@ class TestImageSourceValidation:
 #    namespace (e.g. internal-prompts, system-config) via namespace injection.
 # ===========================================================================
 
+
 class TestRagNamespaceIsolation:
-    @pytest.mark.parametrize("ns", [
-        "traffic-regulations",
-        "safety-incidents",
-        "road-conditions",
-    ])
+    @pytest.mark.parametrize(
+        "ns",
+        [
+            "traffic-regulations",
+            "safety-incidents",
+            "road-conditions",
+        ],
+    )
     def test_allowed_namespaces_pass(self, ns: str):
         validate_rag_namespace(ns)
 
-    @pytest.mark.parametrize("ns", [
-        "internal-secrets",
-        "system-prompts",
-        "admin",
-        "",
-        "   ",
-        "traffic-regulations; DROP TABLE vectors--",
-    ])
+    @pytest.mark.parametrize(
+        "ns",
+        [
+            "internal-secrets",
+            "system-prompts",
+            "admin",
+            "",
+            "   ",
+            "traffic-regulations; DROP TABLE vectors--",
+        ],
+    )
     def test_disallowed_namespaces_blocked(self, ns: str):
         with pytest.raises(ValueError, match="not allowed by policy"):
             validate_rag_namespace(ns)
@@ -119,26 +127,33 @@ class TestRagNamespaceIsolation:
 #    fine-tuned or backdoored variant (ft:gpt-5.4:org:malicious:…).
 # ===========================================================================
 
+
 class TestModelAllowlisting:
-    @pytest.mark.parametrize("model,capability", [
-        ("gpt-5.4", "vlm"),
-        ("gpt-5.4", "validator"),
-        ("gpt-5.4-mini", "guardrail"),
-        ("gpt-5.4-mini", "expert"),
-        ("gpt-5.4-mini", "orchestrator"),
-        ("gpt-5.4", "orchestrator"),
-    ])
+    @pytest.mark.parametrize(
+        "model,capability",
+        [
+            ("gpt-5.4", "vlm"),
+            ("gpt-5.4", "validator"),
+            ("gpt-5.4-mini", "guardrail"),
+            ("gpt-5.4-mini", "expert"),
+            ("gpt-5.4-mini", "orchestrator"),
+            ("gpt-5.4", "orchestrator"),
+        ],
+    )
     def test_allowlisted_models_pass(self, model: str, capability: str):
         assert model_allowed(model, capability=capability) is True
 
-    @pytest.mark.parametrize("model,capability", [
-        ("gpt-3.5-turbo", "vlm"),
-        ("gpt-4o", "guardrail"),
-        ("claude-3-haiku", "expert"),
-        ("ft:gpt-5.4:org:backdoor:abc123", "vlm"),   # fine-tuned backdoor
-        ("gpt-5.4-mini", "vlm"),                      # wrong capability tier
-        ("", "vlm"),
-    ])
+    @pytest.mark.parametrize(
+        "model,capability",
+        [
+            ("gpt-3.5-turbo", "vlm"),
+            ("gpt-4o", "guardrail"),
+            ("claude-3-haiku", "expert"),
+            ("ft:gpt-5.4:org:backdoor:abc123", "vlm"),  # fine-tuned backdoor
+            ("gpt-5.4-mini", "vlm"),  # wrong capability tier
+            ("", "vlm"),
+        ],
+    )
     def test_disallowed_models_blocked(self, model: str, capability: str):
         assert model_allowed(model, capability=capability) is False
 
@@ -154,6 +169,7 @@ class TestModelAllowlisting:
 #    in an image caption or history context to overflow the LLM context window
 #    and hijack downstream reasoning.
 # ===========================================================================
+
 
 class TestInputLengthLimits:
     def test_short_validated_text_passes(self):
@@ -189,6 +205,7 @@ class TestInputLengthLimits:
 #    RunRecord to silently suppress audit evidence or spoof a clean status.
 # ===========================================================================
 
+
 class TestRunRecordSchemaIntegrity:
     def test_valid_clean_record_accepted(self):
         record = build_run_record(
@@ -201,9 +218,18 @@ class TestRunRecordSchemaIntegrity:
         )
         assert record["status"] == "clean"
 
-    @pytest.mark.parametrize("bad_status", [
-        "pwned", "ok", "pass", "TRUE", "1", "", "clean\x00",
-    ])
+    @pytest.mark.parametrize(
+        "bad_status",
+        [
+            "pwned",
+            "ok",
+            "pass",
+            "TRUE",
+            "1",
+            "",
+            "clean\x00",
+        ],
+    )
     def test_invalid_status_blocked(self, bad_status: str):
         with pytest.raises(ValueError):
             build_run_record(
@@ -243,7 +269,7 @@ class TestRunRecordSchemaIntegrity:
             "guardrail_result": {},
             "validated_signals": {},
             "expert_results": {},
-            "metadata": "injected_string",   # must be dict
+            "metadata": "injected_string",  # must be dict
             "active_experts": [],
             "alerts": [],
         }
@@ -281,6 +307,7 @@ class TestRunRecordSchemaIntegrity:
 #    silently disables a security control.
 # ===========================================================================
 
+
 class TestPolicyIntegrity:
     def test_policy_version_is_pinned_string(self):
         policy = load_policy()
@@ -299,19 +326,23 @@ class TestPolicyIntegrity:
     def test_prompt_security_limits_are_positive(self):
         policy = load_policy()
         for key, value in (policy.get("prompt_security") or {}).items():
-            assert isinstance(value, int) and value > 0, \
+            assert isinstance(value, int) and value > 0, (
                 f"prompt_security.{key} must be a positive integer, got {value!r}"
+            )
 
     def test_telemetry_tracing_enabled_by_default(self):
         policy = load_policy()
         telemetry = policy.get("telemetry", {})
-        assert telemetry.get("enable_tracing") is True, \
+        assert telemetry.get("enable_tracing") is True, (
             "Tracing must be enabled by default for audit compliance"
+        )
 
     def test_all_runtime_timeouts_are_set(self):
         policy = load_policy()
         rt = policy.get("runtime_controls", {})
-        for key in ("openai_timeout_seconds", "pinecone_timeout_seconds",
-                    "camera_fetch_timeout_seconds"):
-            assert key in rt and rt[key] > 0, \
-                f"runtime_controls.{key} must be a positive number"
+        for key in (
+            "openai_timeout_seconds",
+            "pinecone_timeout_seconds",
+            "camera_fetch_timeout_seconds",
+        ):
+            assert key in rt and rt[key] > 0, f"runtime_controls.{key} must be a positive number"

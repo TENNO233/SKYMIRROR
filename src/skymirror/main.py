@@ -11,6 +11,9 @@ Execution modes
     # cameras in the dashboard reference file):
     python -m skymirror.main
 
+    # Single live-camera cycle (fetch, process, exit):
+    python -m skymirror.main --once
+
     # Single-shot with a local image (skips camera fetch, useful for testing):
     python -m skymirror.main --image /path/to/frame.jpg
 
@@ -42,26 +45,26 @@ SIGINT (Ctrl-C) and SIGTERM both trigger a clean exit:
 from __future__ import annotations
 
 import argparse
-from collections import deque
 import json
 import logging
 import os
 import signal
 import sys
-from threading import Thread
 import time
+from collections import deque
 from pathlib import Path
+from threading import Thread
 from typing import Any
 
 from dotenv import load_dotenv
 from langsmith import traceable
 
-from skymirror.tools.governance import policy_snapshot
 from skymirror.tools.dashboard_status import (
     clear_runtime_active_cameras,
     set_runtime_active_cameras,
     write_camera_runtime_status,
 )
+from skymirror.tools.governance import policy_snapshot
 from skymirror.tools.langsmith_utils import flush_langsmith_traces
 from skymirror.tools.run_records import build_run_record, new_run_id, write_run_record
 
@@ -73,6 +76,18 @@ _HISTORY_WINDOW_SIZE: int = 5
 _DEFAULT_DASHBOARD_STATUS_PATH = "data/dashboard/live_status.json"
 _DEFAULT_CAMERA_REFERENCE_PATH = "data/sources/traffic_camera_reference.json"
 _DEFAULT_OA_LOG_DIR = "data/oa_log"
+_TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
+_DASHBOARD_AGENT_ORDER = (
+    "image_guardrail",
+    "vlm_agent",
+    "validator_agent",
+    "orchestrator_agent",
+    "order_expert",
+    "safety_expert",
+    "environment_expert",
+    "alert_manager",
+)
+_DASHBOARD_AGENT_NAMES = frozenset(_DASHBOARD_AGENT_ORDER)
 
 # ---------------------------------------------------------------------------
 # Shutdown flag — set by signal handlers, checked in the main loop
@@ -91,6 +106,7 @@ def _handle_signal(signum: int, _frame: Any) -> None:
 # ---------------------------------------------------------------------------
 # Logging setup
 # ---------------------------------------------------------------------------
+
 
 def _configure_logging() -> None:
     """
@@ -193,6 +209,10 @@ def _resolve_oa_log_dir() -> Path:
     return Path(os.getenv("OA_LOG_DIR", _DEFAULT_OA_LOG_DIR)).resolve()
 
 
+def _env_flag_enabled(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in _TRUE_ENV_VALUES
+
+
 def _ensure_record_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     payload = dict(metadata or {})
     for key in ("models", "prompts", "policies", "retrieval", "external_calls"):
@@ -236,9 +256,40 @@ def _write_run_record_safe(
         logger.warning("Failed to write RunRecord for %s/%s: %s", camera_id, status, exc)
 
 
+def _sleep_until_next_cycle(*, cycle_started_at: float, interval_seconds: int) -> None:
+    """Maintain a fixed cycle cadence measured from the iteration start."""
+    deadline = cycle_started_at + max(interval_seconds, 0)
+    while not _shutdown_requested:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(1.0, remaining))
+
+
+def _apply_task_stream_part(part: dict[str, Any], running_agents: set[str]) -> bool:
+    if part.get("type") != "tasks":
+        return False
+
+    payload = part.get("data")
+    if not isinstance(payload, dict):
+        return False
+
+    agent_name = str(payload.get("name", "")).strip()
+    if agent_name not in _DASHBOARD_AGENT_NAMES:
+        return False
+
+    before = set(running_agents)
+    if "input" in payload:
+        running_agents.add(agent_name)
+    else:
+        running_agents.discard(agent_name)
+    return running_agents != before
+
+
 # ---------------------------------------------------------------------------
 # Pipeline runner (single iteration)
 # ---------------------------------------------------------------------------
+
 
 def _build_history_entry(final_state: dict[str, Any]) -> dict[str, Any]:
     """Persist only the fields needed by downstream temporal reasoning."""
@@ -388,9 +439,7 @@ def _run_pipeline(
     alerts: list[dict] = final_state.get("alerts", [])
 
     if alerts:
-        logger.warning(
-            "Pipeline complete — %d alert(s) generated:", len(alerts)
-        )
+        logger.warning("Pipeline complete — %d alert(s) generated:", len(alerts))
         for i, alert in enumerate(alerts, start=1):
             severity = alert.get("severity", "unknown").upper()
             alert_type = alert.get("sub_type") or alert.get("domain", "unknown")
@@ -407,9 +456,7 @@ def _run_pipeline(
         image_path=image_path,
         final_state=final_state,
         message=(
-            str(alerts[0].get("message", "")).strip()
-            if alerts
-            else "Frame processed successfully."
+            str(alerts[0].get("message", "")).strip() if alerts else "Frame processed successfully."
         ),
     )
 
@@ -435,6 +482,7 @@ def _run_pipeline(
 # Entry-point modes
 # ---------------------------------------------------------------------------
 
+
 def _run_daemon(
     app: Any,
     camera_id: str,
@@ -442,6 +490,8 @@ def _run_daemon(
     interval: int,
     keep_history: bool,
     status_path: Path,
+    *,
+    run_once: bool = False,
 ) -> None:
     """
     Main polling loop.  Runs until SIGINT / SIGTERM is received.
@@ -450,7 +500,7 @@ def _run_daemon(
         app:          Compiled LangGraph application.
         camera_id:    LTA camera ID to poll.
         frames_dir:   Directory where fetched frames are stored.
-        interval:     Seconds to sleep between iterations.
+        interval:     Target total seconds per iteration.
         keep_history: Whether to retain timestamped historical frames.
         status_path:  JSON snapshot file consumed by the dashboard backend.
     """
@@ -459,10 +509,11 @@ def _run_daemon(
     from skymirror.tools.camera_fetcher import fetch_latest_frame, publish_latest_frame
 
     logger.info(
-        "Daemon started — camera=%s | interval=%ds | frames_dir=%s",
+        "Daemon started — camera=%s | interval=%ds | frames_dir=%s | run_once=%s",
         camera_id,
         interval,
         frames_dir,
+        run_once,
     )
 
     iteration = 0
@@ -476,6 +527,7 @@ def _run_daemon(
     )
 
     while not _shutdown_requested:
+        cycle_started_at = time.monotonic()
         iteration += 1
         logger.info("─── Iteration %d ───────────────────────────────", iteration)
 
@@ -542,12 +594,14 @@ def _run_daemon(
                 publish_latest_frame(camera_id, frames_dir, image_path)
                 camera_history.append(_build_history_entry(final_state))
 
-        # 3. Sleep until next cycle, checking shutdown flag every second
-        #    so we don't block a SIGTERM for up to `interval` seconds.
-        for _ in range(interval):
-            if _shutdown_requested:
-                break
-            time.sleep(1)
+        if run_once:
+            logger.info("Run-once mode enabled — completed one iteration for camera %s.", camera_id)
+            break
+
+        _sleep_until_next_cycle(
+            cycle_started_at=cycle_started_at,
+            interval_seconds=interval,
+        )
 
     _publish_dashboard_status(
         status_path=status_path,
@@ -567,6 +621,7 @@ def _run_multi_camera_daemon(
     interval: int,
     keep_history: bool,
     status_path: Path,
+    run_once: bool = False,
 ) -> None:
     global _shutdown_requested
 
@@ -584,6 +639,7 @@ def _run_multi_camera_daemon(
                 "interval": interval,
                 "keep_history": keep_history,
                 "status_path": status_path,
+                "run_once": run_once,
             },
             daemon=True,
         )
@@ -595,7 +651,12 @@ def _run_multi_camera_daemon(
         while not _shutdown_requested:
             failed_threads = [thread.name for thread in threads if not thread.is_alive()]
             if failed_threads:
-                logger.error("Camera worker thread exited unexpectedly: %s", ", ".join(failed_threads))
+                if run_once and len(failed_threads) == len(threads):
+                    logger.info("Run-once mode complete for all camera worker threads.")
+                    break
+                logger.error(
+                    "Camera worker thread exited unexpectedly: %s", ", ".join(failed_threads)
+                )
                 _shutdown_requested = True
                 break
             time.sleep(1)
@@ -641,12 +702,18 @@ def _run_report() -> None:
 # CLI argument parsing
 # ---------------------------------------------------------------------------
 
-def _parse_args() -> argparse.Namespace:
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="skymirror",
         description="SKYMIRROR — Multi-Agent Traffic Camera Analysis Daemon",
     )
     mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--once",
+        action="store_true",
+        help="Fetch and process one live camera cycle, then exit.",
+    )
     mode.add_argument(
         "--image",
         metavar="PATH",
@@ -657,12 +724,13 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Generate the daily summary report immediately, then exit.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     """Application entry point."""
@@ -709,6 +777,7 @@ def main() -> None:
     frames_dir = Path(os.getenv("FRAMES_DIR", "data/frames")).resolve()
     status_path = Path(os.getenv("DASHBOARD_STATUS_PATH", _DEFAULT_DASHBOARD_STATUS_PATH)).resolve()
     keep_history: bool = os.getenv("KEEP_FRAME_HISTORY", "true").lower() != "false"
+    run_once = args.once or _env_flag_enabled("SKYMIRROR_RUN_ONCE")
 
     logger.info("Configuration:")
     logger.info("  TARGET_CAMERA_IDS          = %s", ", ".join(camera_ids))
@@ -716,29 +785,34 @@ def main() -> None:
     logger.info("  FRAMES_DIR                 = %s", frames_dir)
     logger.info("  DASHBOARD_STATUS_PATH      = %s", status_path)
     logger.info("  KEEP_FRAME_HISTORY         = %s", keep_history)
+    logger.info("  SKYMIRROR_RUN_ONCE         = %s", run_once)
 
     # --- Start APScheduler for daily reports (background thread) -------------
-    try:
-        from apscheduler.schedulers.background import BackgroundScheduler
-        from skymirror.agents.report_generator import generate_daily_report
+    if not run_once:
+        try:
+            from apscheduler.schedulers.background import BackgroundScheduler
 
-        scheduler = BackgroundScheduler(timezone="UTC")
-        scheduler.add_job(
-            generate_daily_report,
-            trigger="cron",
-            hour=0,
-            minute=5,
-            id="daily_report",
-            replace_existing=True,
-        )
-        scheduler.start()
-        logger.info("APScheduler started — daily report job scheduled at 00:05 UTC.")
-    except ImportError:
-        logger.warning(
-            "apscheduler not installed — daily report scheduling disabled. "
-            "Install with: pip install apscheduler"
-        )
-        scheduler = None  # type: ignore[assignment]
+            from skymirror.agents.report_generator import generate_daily_report
+
+            scheduler = BackgroundScheduler(timezone="UTC")
+            scheduler.add_job(
+                generate_daily_report,
+                trigger="cron",
+                hour=0,
+                minute=5,
+                id="daily_report",
+                replace_existing=True,
+            )
+            scheduler.start()
+            logger.info("APScheduler started — daily report job scheduled at 00:05 UTC.")
+        except ImportError:
+            logger.warning(
+                "apscheduler not installed — daily report scheduling disabled. "
+                "Install with: pip install apscheduler"
+            )
+            scheduler = None  # type: ignore[assignment]
+    else:
+        logger.info("Run-once mode enabled — skipping APScheduler startup.")
 
     # --- Enter the main polling loop -----------------------------------------
     try:
@@ -749,6 +823,7 @@ def main() -> None:
             interval=interval,
             keep_history=keep_history,
             status_path=status_path,
+            run_once=run_once,
         )
     finally:
         clear_runtime_active_cameras(status_path)

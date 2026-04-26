@@ -1,12 +1,28 @@
 """Tests for Alert Generation Agent."""
+
 from __future__ import annotations
 
 import json
 import os
+from datetime import UTC
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+from scripts.evaluate_alerts import evaluate_alerts, load_alerts
+from skymirror.agents.alert_manager import _extract_camera_id, generate_alerts
+from skymirror.tools.alert.lta_lookup import (
+    LtaCorroboration,
+    LtaEvent,
+    LtaMatch,
+    _haversine_m,
+    fetch_lta_events,
+    lookup_lta_events,
+    match_events,
+    resolve_camera_location,
+)
+from skymirror.tools.alert.rendering import render_alert
 
 
 @pytest.fixture
@@ -19,8 +35,10 @@ def alert_fixtures(fixtures_dir: Path) -> dict:
 # Task 1: Constants
 # ---------------------------------------------------------------------------
 
+
 def test_domain_map_covers_all_experts():
     from skymirror.tools.alert.constants import DOMAIN_MAP
+
     assert DOMAIN_MAP["order_expert"] == "traffic"
     assert DOMAIN_MAP["safety_expert"] == "safety"
     assert DOMAIN_MAP["environment_expert"] == "environment"
@@ -28,12 +46,14 @@ def test_domain_map_covers_all_experts():
 
 def test_sub_type_map_has_other_for_each_domain():
     from skymirror.tools.alert.constants import SUB_TYPE_MAP
+
     for domain in ("traffic", "safety", "environment"):
         assert "other" in SUB_TYPE_MAP[domain]
 
 
 def test_department_map_covers_all_domains():
     from skymirror.tools.alert.constants import DEPARTMENT_MAP
+
     assert "traffic" in DEPARTMENT_MAP
     assert "safety" in DEPARTMENT_MAP
     assert "environment" in DEPARTMENT_MAP
@@ -46,8 +66,10 @@ def test_department_map_covers_all_domains():
 # Task 3: Classification
 # ---------------------------------------------------------------------------
 
+
 def test_classify_returns_valid_structure(mock_llm):
     from skymirror.tools.alert.classification import classify
+
     result = classify(
         domain="traffic",
         findings=[{"description": "Running red light", "confidence": 0.87}],
@@ -65,6 +87,7 @@ def test_classify_falls_back_on_llm_failure(monkeypatch):
     class _Broken:
         def with_structured_output(self, schema):
             return self
+
         def invoke(self, *_a, **_kw):
             raise RuntimeError("API down")
 
@@ -91,6 +114,7 @@ def test_classify_forces_other_on_invalid_sub_type(monkeypatch):
     class _FakeLLM:
         def with_structured_output(self, schema):
             return self
+
         def invoke(self, messages):
             return _FakeClassification()
 
@@ -106,6 +130,7 @@ def test_classify_forces_other_on_invalid_sub_type(monkeypatch):
 
 def test_build_classification_prompt_includes_domain_and_findings():
     from skymirror.tools.alert.classification import build_classification_prompt
+
     prompt = build_classification_prompt(
         domain="safety",
         findings=[{"description": "Collision", "confidence": 0.9}],
@@ -121,13 +146,21 @@ def test_build_classification_prompt_includes_domain_and_findings():
 # Task 4: Rendering
 # ---------------------------------------------------------------------------
 
+
 def test_render_alert_produces_complete_dict():
     from skymirror.tools.alert.rendering import render_alert
+
     alert = render_alert(
         expert_name="order_expert",
-        classification={"sub_type": "red_light", "severity": "high", "message": "Red light violation"},
+        classification={
+            "sub_type": "red_light",
+            "severity": "high",
+            "message": "Red light violation",
+        },
         findings=[{"description": "Running red light", "confidence": 0.87}],
-        regulations=[{"source": "RTA", "regulation_code": "S120", "excerpt": "...", "relevance_score": 0.89}],
+        regulations=[
+            {"source": "RTA", "regulation_code": "S120", "excerpt": "...", "relevance_score": 0.89}
+        ],
         image_path="data/frames/cam4798_20260412T083000.jpg",
     )
     assert alert["domain"] == "traffic"
@@ -146,6 +179,7 @@ def test_render_alert_produces_complete_dict():
 
 def test_render_alert_deterministic_id():
     from skymirror.tools.alert.rendering import render_alert
+
     kwargs = dict(
         expert_name="safety_expert",
         classification={"sub_type": "collision", "severity": "critical", "message": "Crash"},
@@ -160,16 +194,19 @@ def test_render_alert_deterministic_id():
 
 def test_render_alert_different_inputs_different_ids():
     from skymirror.tools.alert.rendering import render_alert
+
     a1 = render_alert(
         expert_name="order_expert",
         classification={"sub_type": "red_light", "severity": "high", "message": "msg"},
-        findings=[], regulations=[],
+        findings=[],
+        regulations=[],
         image_path="frame_A.jpg",
     )
     a2 = render_alert(
         expert_name="safety_expert",
         classification={"sub_type": "collision", "severity": "high", "message": "msg"},
-        findings=[], regulations=[],
+        findings=[],
+        regulations=[],
         image_path="frame_A.jpg",
     )
     assert a1["alert_id"] != a2["alert_id"]
@@ -177,10 +214,12 @@ def test_render_alert_different_inputs_different_ids():
 
 def test_render_alert_unknown_expert_uses_unknown_domain():
     from skymirror.tools.alert.rendering import render_alert
+
     alert = render_alert(
         expert_name="unknown_expert",
         classification={"sub_type": "other", "severity": "low", "message": "msg"},
-        findings=[], regulations=[],
+        findings=[],
+        regulations=[],
         image_path="frame.jpg",
     )
     assert alert["domain"] == "unknown"
@@ -197,6 +236,7 @@ _TEST_DATE = "2026-04-12"
 
 def test_dispatch_writes_alert_json(tmp_path):
     from skymirror.tools.alert.dispatcher import dispatch
+
     alert = {
         "alert_id": "abc123",
         "domain": "traffic",
@@ -209,12 +249,14 @@ def test_dispatch_writes_alert_json(tmp_path):
     alert_file = tmp_path / _TEST_DATE / "abc123.json"
     assert alert_file.exists()
     import json
+
     data = json.loads(alert_file.read_text())
     assert data["alert_id"] == "abc123"
 
 
 def test_dispatch_writes_dispatch_log(tmp_path):
     from skymirror.tools.alert.dispatcher import dispatch
+
     alert = {
         "alert_id": "abc123",
         "domain": "traffic",
@@ -227,6 +269,7 @@ def test_dispatch_writes_dispatch_log(tmp_path):
     log_file = tmp_path / _TEST_DATE / "dispatch_log.jsonl"
     assert log_file.exists()
     import json
+
     entry = json.loads(log_file.read_text().strip())
     assert entry["alert_id"] == "abc123"
     assert entry["department"] == "Traffic Police"
@@ -236,6 +279,7 @@ def test_dispatch_writes_dispatch_log(tmp_path):
 
 def test_dispatch_is_idempotent(tmp_path):
     from skymirror.tools.alert.dispatcher import dispatch
+
     alert = {
         "alert_id": "abc123",
         "domain": "traffic",
@@ -247,18 +291,19 @@ def test_dispatch_is_idempotent(tmp_path):
     dispatch(alert, output_dir=tmp_path)  # second call
 
     # Alert file written once
-    import json
+
     alert_file = tmp_path / _TEST_DATE / "abc123.json"
     assert alert_file.exists()
 
     # Dispatch log has only one entry
     log_file = tmp_path / _TEST_DATE / "dispatch_log.jsonl"
-    lines = [l for l in log_file.read_text().strip().split("\n") if l]
+    lines = [line for line in log_file.read_text().strip().split("\n") if line]
     assert len(lines) == 1
 
 
 def test_dispatch_multiple_alerts_appends_log(tmp_path):
     from skymirror.tools.alert.dispatcher import dispatch
+
     for i, dept in enumerate(["Traffic Police", "Emergency Management Center"]):
         dispatch(
             {
@@ -272,18 +317,21 @@ def test_dispatch_multiple_alerts_appends_log(tmp_path):
         )
 
     import json
+
     log_file = tmp_path / _TEST_DATE / "dispatch_log.jsonl"
-    lines = [l for l in log_file.read_text().strip().split("\n") if l]
+    lines = [line for line in log_file.read_text().strip().split("\n") if line]
     assert len(lines) == 2
-    entries = [json.loads(l) for l in lines]
+    entries = [json.loads(line) for line in lines]
     assert entries[0]["department"] == "Traffic Police"
     assert entries[1]["department"] == "Emergency Management Center"
 
 
 def test_dispatch_falls_back_to_today_when_timestamp_missing(tmp_path):
     """Alerts without timestamp still get dispatched (to today's UTC date)."""
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from skymirror.tools.alert.dispatcher import dispatch
+
     alert = {
         "alert_id": "no_ts",
         "domain": "traffic",
@@ -291,7 +339,7 @@ def test_dispatch_falls_back_to_today_when_timestamp_missing(tmp_path):
         "department": "Traffic Police",
     }
     dispatch(alert, output_dir=tmp_path)
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
     assert (tmp_path / today / "no_ts.json").exists()
 
 
@@ -299,8 +347,10 @@ def test_dispatch_falls_back_to_today_when_timestamp_missing(tmp_path):
 # Task 6: Alert Manager (agent orchestration)
 # ---------------------------------------------------------------------------
 
+
 def test_generate_alerts_single_expert(tmp_path, mock_llm):
     from skymirror.agents.alert_manager import generate_alerts
+
     expert_results = {
         "order_expert": {
             "findings": [{"description": "Running red light", "confidence": 0.87}],
@@ -331,6 +381,7 @@ def test_generate_alerts_single_expert(tmp_path, mock_llm):
 
 def test_generate_alerts_multi_expert(tmp_path, mock_llm):
     from skymirror.agents.alert_manager import generate_alerts
+
     expert_results = {
         "safety_expert": {
             "findings": [{"description": "Collision", "confidence": 0.94}],
@@ -356,6 +407,7 @@ def test_generate_alerts_multi_expert(tmp_path, mock_llm):
 
 def test_generate_alerts_skips_empty_findings(tmp_path, mock_llm):
     from skymirror.agents.alert_manager import generate_alerts
+
     expert_results = {
         "order_expert": {
             "findings": [],
@@ -374,6 +426,7 @@ def test_generate_alerts_skips_empty_findings(tmp_path, mock_llm):
 
 def test_generate_alerts_empty_expert_results(tmp_path, mock_llm):
     from skymirror.agents.alert_manager import generate_alerts
+
     alerts = generate_alerts(
         expert_results={},
         image_path="data/frames/cam4798.jpg",
@@ -386,6 +439,7 @@ def test_generate_alerts_empty_expert_results(tmp_path, mock_llm):
 def test_generate_alerts_returns_list_to_oa(tmp_path, mock_llm):
     """Verify the contract: generate_alerts returns a plain list of dicts."""
     from skymirror.agents.alert_manager import generate_alerts
+
     expert_results = {
         "order_expert": {
             "findings": [{"description": "Speeding", "confidence": 0.8}],
@@ -408,9 +462,11 @@ def test_generate_alerts_returns_list_to_oa(tmp_path, mock_llm):
 # Task 8: Integration test with fixture data
 # ---------------------------------------------------------------------------
 
+
 def test_end_to_end_single_expert_fixture(tmp_path, alert_fixtures, mock_llm):
     """End-to-end: single expert fixture produces one alert with all fields."""
     from skymirror.agents.alert_manager import generate_alerts
+
     fixture = alert_fixtures["single_expert"]
     alerts = generate_alerts(
         expert_results=fixture["expert_results"],
@@ -421,9 +477,19 @@ def test_end_to_end_single_expert_fixture(tmp_path, alert_fixtures, mock_llm):
     assert len(alerts) == 1
     alert = alerts[0]
     # Schema completeness
-    for key in ("alert_id", "domain", "sub_type", "severity", "message",
-                "source_expert", "evidence", "regulations", "department",
-                "timestamp", "image_path"):
+    for key in (
+        "alert_id",
+        "domain",
+        "sub_type",
+        "severity",
+        "message",
+        "source_expert",
+        "evidence",
+        "regulations",
+        "department",
+        "timestamp",
+        "image_path",
+    ):
         assert key in alert, f"Missing key: {key}"
     assert alert["domain"] == "traffic"
     assert alert["department"] == "Traffic Police"
@@ -439,6 +505,7 @@ def test_end_to_end_single_expert_fixture(tmp_path, alert_fixtures, mock_llm):
 def test_end_to_end_multi_expert_fixture(tmp_path, alert_fixtures, mock_llm):
     """End-to-end: multi-expert fixture produces two alerts to different departments."""
     from skymirror.agents.alert_manager import generate_alerts
+
     fixture = alert_fixtures["multi_expert"]
     alerts = generate_alerts(
         expert_results=fixture["expert_results"],
@@ -452,16 +519,17 @@ def test_end_to_end_multi_expert_fixture(tmp_path, alert_fixtures, mock_llm):
     assert "Municipal & Meteorological Duty Office" in departments
 
     # Two alert files + one dispatch log (under shared date subdir)
-    import json
+
     alert_date = alerts[0]["timestamp"][:10]
     log_file = tmp_path / alert_date / "dispatch_log.jsonl"
-    lines = [l for l in log_file.read_text().strip().split("\n") if l]
+    lines = [line for line in log_file.read_text().strip().split("\n") if line]
     assert len(lines) == 2
 
 
 def test_end_to_end_empty_findings_fixture(tmp_path, alert_fixtures, mock_llm):
     """End-to-end: empty findings fixture produces no alerts."""
     from skymirror.agents.alert_manager import generate_alerts
+
     fixture = alert_fixtures["empty_findings"]
     alerts = generate_alerts(
         expert_results=fixture["expert_results"],
@@ -477,13 +545,6 @@ def test_end_to_end_empty_findings_fixture(tmp_path, alert_fixtures, mock_llm):
 # =============================================================================
 # Task: LTA Lookup — Data Structures & Camera Resolution
 # =============================================================================
-
-from skymirror.tools.alert.lta_lookup import (
-    LtaEvent,
-    LtaMatch,
-    LtaCorroboration,
-    resolve_camera_location,
-)
 
 
 class TestResolveCamera:
@@ -530,8 +591,6 @@ class TestResolveCamera:
 # =============================================================================
 # Task 3: Haversine Distance and Event Matching
 # =============================================================================
-
-from skymirror.tools.alert.lta_lookup import _haversine_m, match_events
 
 
 class TestHaversine:
@@ -582,9 +641,6 @@ class TestMatchEvents:
         matches = match_events(1.29531, 103.871, 500.0, "traffic", events)
         assert len(matches) == 2
         assert matches[0].distance_m <= matches[1].distance_m
-
-
-from skymirror.tools.alert.lta_lookup import fetch_lta_events, lookup_lta_events
 
 
 class TestFetchLtaEvents:
@@ -697,9 +753,6 @@ class TestLookupLtaEvents:
 # Task 5: Rendering Changes — lta_corroboration field in render_alert
 # =============================================================================
 
-from skymirror.tools.alert.rendering import render_alert
-from skymirror.tools.alert.lta_lookup import LtaCorroboration, LtaMatch, LtaEvent
-
 
 class TestRenderAlertCorroboration:
     """Tests for lta_corroboration field in rendered alert dict."""
@@ -719,8 +772,12 @@ class TestRenderAlertCorroboration:
 
     def test_corroboration_unavailable_gives_null_field(self):
         corr = LtaCorroboration(
-            camera_id="4798", camera_lat=0.0, camera_lng=0.0,
-            matches=[], queried_at="2026-04-15T08:30:00Z", api_available=False,
+            camera_id="4798",
+            camera_lat=0.0,
+            camera_lng=0.0,
+            matches=[],
+            queried_at="2026-04-15T08:30:00Z",
+            api_available=False,
         )
         alert = render_alert(**self._base_args(), corroboration=corr)
         assert alert["lta_corroboration"] is None
@@ -729,8 +786,12 @@ class TestRenderAlertCorroboration:
         event = LtaEvent("Accident", "Crash on AYE", 1.295, 103.871, "TrafficIncidents")
         match = LtaMatch(event=event, distance_m=23.5, match_type="location_and_domain")
         corr = LtaCorroboration(
-            camera_id="4798", camera_lat=1.29531, camera_lng=103.871,
-            matches=[match], queried_at="2026-04-15T08:30:00Z", api_available=True,
+            camera_id="4798",
+            camera_lat=1.29531,
+            camera_lng=103.871,
+            matches=[match],
+            queried_at="2026-04-15T08:30:00Z",
+            api_available=True,
         )
         alert = render_alert(**self._base_args(), corroboration=corr)
 
@@ -749,21 +810,30 @@ class TestRenderAlertCorroboration:
         event = LtaEvent("Accident", "Crash", 1.295, 103.871, "TrafficIncidents")
         match = LtaMatch(event=event, distance_m=50.0, match_type="location_and_domain")
         corr = LtaCorroboration(
-            camera_id="4798", camera_lat=1.29531, camera_lng=103.871,
-            matches=[match], queried_at="2026-04-15T08:30:00Z", api_available=True,
+            camera_id="4798",
+            camera_lat=1.29531,
+            camera_lng=103.871,
+            matches=[match],
+            queried_at="2026-04-15T08:30:00Z",
+            api_available=True,
         )
         alert = render_alert(**self._base_args(), corroboration=corr)
 
         # All 11 original fields still present
         for key in [
-            "alert_id", "domain", "sub_type", "severity", "message",
-            "source_expert", "evidence", "regulations", "department",
-            "timestamp", "image_path",
+            "alert_id",
+            "domain",
+            "sub_type",
+            "severity",
+            "message",
+            "source_expert",
+            "evidence",
+            "regulations",
+            "department",
+            "timestamp",
+            "image_path",
         ]:
             assert key in alert
-
-
-from skymirror.agents.alert_manager import _extract_camera_id, generate_alerts
 
 
 class TestExtractCameraId:
@@ -845,9 +915,6 @@ class TestAlertManagerLtaIntegration:
         assert alerts[0]["lta_corroboration"] is None
 
 
-from scripts.evaluate_alerts import evaluate_alerts, load_alerts
-
-
 class TestEvaluateAlerts:
     """Tests for the evaluation script logic."""
 
@@ -873,8 +940,13 @@ class TestEvaluateAlerts:
             "lta_corroboration": {
                 "api_available": True,
                 "matches": [
-                    {"match_type": "location_and_domain", "event_type": "Accident",
-                     "description": "Crash", "distance_m": 50.0, "source_api": "TrafficIncidents"}
+                    {
+                        "match_type": "location_and_domain",
+                        "event_type": "Accident",
+                        "description": "Crash",
+                        "distance_m": 50.0,
+                        "source_api": "TrafficIncidents",
+                    }
                 ],
                 "match_summary": {"total": 1, "location_and_domain": 1, "location_only": 0},
             },
@@ -904,9 +976,16 @@ class TestEvaluateAlerts:
                 "api_available": True,
                 "matches": [
                     # agent only corroborated the Accident, missed other nearby events
-                    {"match_type": "location_and_domain", "event_type": "Accident",
-                     "description": "(15/4)08:25 Accident on Ayer Rajah Expressway (AYE) towards Tuas after Clementi Ave 6 Exit.",
-                     "distance_m": 25.0, "source_api": "TrafficIncidents"},
+                    {
+                        "match_type": "location_and_domain",
+                        "event_type": "Accident",
+                        "description": (
+                            "(15/4)08:25 Accident on Ayer Rajah Expressway (AYE) "
+                            "towards Tuas after Clementi Ave 6 Exit."
+                        ),
+                        "distance_m": 25.0,
+                        "source_api": "TrafficIncidents",
+                    },
                 ],
                 "match_summary": {"total": 1, "location_and_domain": 1, "location_only": 0},
             },

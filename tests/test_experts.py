@@ -48,7 +48,9 @@ def test_order_expert_node_uses_retriever_and_model(monkeypatch) -> None:
         ),
     )
 
-    result = experts.order_expert_node({"validated_text": "A car is stopped in a yellow box junction."})
+    result = experts.order_expert_node(
+        {"validated_text": "A car is stopped in a yellow box junction."}
+    )
 
     assert result["expert_results"]["order_expert"]["matched"] is True
     assert result["expert_results"]["order_expert"]["summary"] == (
@@ -108,7 +110,9 @@ def test_expert_gracefully_handles_rag_fallback_failure(monkeypatch) -> None:
     monkeypatch.setattr(
         experts,
         "get_pinecone_retriever",
-        lambda **_: (_ for _ in ()).throw(RuntimeError("Environment variable PINECONE_API_KEY is required.")),
+        lambda **_: (_ for _ in ()).throw(
+            RuntimeError("Environment variable PINECONE_API_KEY is required.")
+        ),
     )
 
     result = experts.environment_expert_node(

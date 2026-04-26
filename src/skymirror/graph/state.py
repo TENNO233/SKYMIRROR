@@ -97,6 +97,7 @@ class HistoryFrame(TypedDict, total=False):
 # State Schema
 # ---------------------------------------------------------------------------
 
+
 class SkymirrorState(TypedDict, total=False):
     """
     Shared state object for the SKYMIRROR LangGraph pipeline.

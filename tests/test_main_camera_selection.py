@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import shutil
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -97,7 +97,9 @@ def test_run_multi_camera_daemon_exits_cleanly_in_once_mode(monkeypatch) -> None
         calls.append(kwargs)
 
     monkeypatch.setattr(skymirror_main, "_run_daemon", fake_run_daemon)
-    monkeypatch.setattr(skymirror_main, "set_runtime_active_cameras", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        skymirror_main, "set_runtime_active_cameras", lambda *_args, **_kwargs: None
+    )
 
     skymirror_main._run_multi_camera_daemon(
         app=object(),

@@ -53,9 +53,7 @@ def get_current_run_trace_info() -> dict[str, Any]:
             "project_name": str(getattr(run_tree, "session_name", "")).strip(),
         }
         return {
-            key: value
-            for key, value in payload.items()
-            if isinstance(value, str) and value.strip()
+            key: value for key, value in payload.items() if isinstance(value, str) and value.strip()
         }
     except Exception as exc:
         logger.warning("LangSmith trace URL lookup failed: %s", exc)

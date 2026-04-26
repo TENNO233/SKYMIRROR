@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import logging
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
-import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def set_runtime_active_cameras(
             if camera_id in active_camera_ids
         }
         snapshot["active_camera_ids"] = active_camera_ids
-        snapshot["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
+        snapshot["updated_at"] = datetime.now(tz=UTC).isoformat()
         _write_runtime_status_unlocked(path, snapshot)
 
 
@@ -67,7 +67,9 @@ def _read_runtime_status_unlocked(path: Path) -> dict[str, Any]:
     updated_at = payload.get("updated_at")
     return {
         "updated_at": updated_at if isinstance(updated_at, str) else "",
-        "active_camera_ids": [str(camera_id).strip() for camera_id in active_camera_ids if str(camera_id).strip()],
+        "active_camera_ids": [
+            str(camera_id).strip() for camera_id in active_camera_ids if str(camera_id).strip()
+        ],
         "cameras": cameras,
     }
 
@@ -93,7 +95,7 @@ def write_camera_runtime_status(
         existing = cameras.get(camera_id, {})
         existing = existing if isinstance(existing, dict) else {}
 
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         status_message = _resolve_status_message(
             existing=existing,
             backend_status=backend_status,
@@ -200,7 +202,7 @@ def _resolve_image_timestamp(image_path: str) -> str:
         path = Path(image_path)
         if not path.is_file():
             return ""
-        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
         return mtime.isoformat()
     except OSError:
         return ""
@@ -222,7 +224,9 @@ def _coerce_history(value: Any) -> list[dict[str, Any]]:
     for item in value:
         if not isinstance(item, dict):
             continue
-        normalized.append({str(key): item_value for key, item_value in item.items() if str(key).strip()})
+        normalized.append(
+            {str(key): item_value for key, item_value in item.items() if str(key).strip()}
+        )
     return normalized[-_HISTORY_LIMIT:]
 
 

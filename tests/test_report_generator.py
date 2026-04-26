@@ -1,7 +1,8 @@
 """Tests for RunRecord-based Daily Explication Report Agent."""
+
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -36,7 +37,7 @@ def test_load_oa_log_skips_malformed_lines(fixtures_dir: Path):
 def test_yesterday_sgt_returns_previous_sgt_date(monkeypatch):
     from skymirror.tools.daily_report import loader as report_helpers
 
-    fixed = datetime(2026, 4, 13, 2, 0, tzinfo=timezone.utc)
+    fixed = datetime(2026, 4, 13, 2, 0, tzinfo=UTC)
 
     class _Clock:
         @classmethod
@@ -215,9 +216,7 @@ def test_generate_report_end_to_end_normal_day(tmp_path, fixtures_dir, mock_llm)
 
     oa_log_dir = tmp_path / "oa_log"
     oa_log_dir.mkdir()
-    (oa_log_dir / "2026-04-12.jsonl").write_bytes(
-        (fixtures_dir / "normal_day.jsonl").read_bytes()
-    )
+    (oa_log_dir / "2026-04-12.jsonl").write_bytes((fixtures_dir / "normal_day.jsonl").read_bytes())
 
     report_path = generate_report(
         target_date=date(2026, 4, 12),

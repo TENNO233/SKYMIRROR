@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -19,7 +19,7 @@ def new_run_id() -> str:
 
 
 def now_utc_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def build_run_record(
@@ -106,4 +106,3 @@ def write_run_record(oa_log_dir: Path | str, record: dict[str, Any]) -> Path:
     with output_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     return output_path
-

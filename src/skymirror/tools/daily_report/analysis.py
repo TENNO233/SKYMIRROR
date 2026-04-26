@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from skymirror.tools.daily_report.loader import SGT
@@ -68,7 +68,7 @@ def compute_temporal_stats(records: list[dict[str, Any]]) -> dict[str, Any]:
         except ValueError:
             continue
         if dt_utc.tzinfo is None:
-            dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+            dt_utc = dt_utc.replace(tzinfo=UTC)
         dt_sgt = dt_utc.astimezone(SGT)
         hour = dt_sgt.hour
         hourly_total[hour] += 1
@@ -148,7 +148,9 @@ def _record_severity_rank(record: dict[str, Any]) -> int:
     return max(_SEVERITY_ORDER.get(str(alert.get("severity", "low")), 0) for alert in alerts)
 
 
-def select_representative_cases(triggered: list[dict[str, Any]], n: int = 3) -> list[dict[str, Any]]:
+def select_representative_cases(
+    triggered: list[dict[str, Any]], n: int = 3
+) -> list[dict[str, Any]]:
     if not triggered:
         return []
 

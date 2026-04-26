@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import argparse
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
 import os
-from pathlib import Path
 import subprocess
 import sys
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from threading import RLock
 from typing import Any, BinaryIO
 from urllib.parse import unquote, urlparse
@@ -148,7 +148,9 @@ class DashboardRuntimeManager:
             stdout=self._stdout_handle,
             stderr=self._stderr_handle,
         )
-        logger.info("dashboard: started backend daemon for camera %s (pid=%s)", camera_id, self._process.pid)
+        logger.info(
+            "dashboard: started backend daemon for camera %s (pid=%s)", camera_id, self._process.pid
+        )
 
     def _stop_backend_unlocked(self) -> None:
         process = self._process
@@ -302,7 +304,9 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         return payload
 
     def _serve_static(self, filename: str, *, content_type: str) -> None:
-        self._serve_file(self.server.dashboard_paths.static_dir / filename, content_type=content_type)
+        self._serve_file(
+            self.server.dashboard_paths.static_dir / filename, content_type=content_type
+        )
 
     def _serve_file(self, path: Path, *, content_type: str | None = None) -> None:
         if not path.is_file():
