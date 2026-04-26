@@ -83,7 +83,7 @@ def _build_documents_for_file(
 
     for index, chunk in enumerate(chunks):
         source_key = f"{namespace}:{path.as_posix()}:{index}"
-        doc_id = hashlib.sha1(source_key.encode("utf-8")).hexdigest()
+        doc_id = hashlib.sha256(source_key.encode("utf-8")).hexdigest()
         documents.append(
             Document(
                 page_content=chunk,
