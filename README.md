@@ -17,3 +17,8 @@ The validator no longer fuses outputs from multiple providers. It now cross-chec
 ### Environment
 
 Copy `.env.example` to `.env`, fill in your real keys, and run the app with `python -m skymirror.main` or the dashboard with `python -m skymirror.dashboard.server`.
+
+### Runtime Governance
+
+The runtime writes one `RunRecord` JSONL entry per processed frame under `data/oa_log/`.
+Governance controls live in `governance/policy.yaml`, and offline release checks can be evaluated with `python -m scripts.evaluate_runtime`.

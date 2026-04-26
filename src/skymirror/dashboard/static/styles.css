@@ -122,7 +122,6 @@ button {
 .refresh-stamp,
 .status-chip,
 .signal-pill,
-.expert-pill,
 .report-meta-pill {
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -215,6 +214,14 @@ button {
   gap: 8px;
 }
 
+.status-chip-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .monitor-timestamp {
   color: var(--muted);
   font-size: 0.82rem;
@@ -222,7 +229,6 @@ button {
 
 .status-chip,
 .signal-pill,
-.expert-pill,
 .report-meta-pill {
   display: inline-flex;
   align-items: center;
@@ -262,6 +268,53 @@ button {
   color: #9db2bf;
 }
 
+.agent-trace-strip {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid rgba(125, 181, 204, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.agent-status-pill.is-active {
+  border-color: rgba(103, 211, 197, 0.36);
+  color: #e8fff8;
+  background: rgba(103, 211, 197, 0.1);
+}
+
+.agent-status-light {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(137, 168, 188, 0.45);
+  box-shadow: none;
+  flex-shrink: 0;
+}
+
+.agent-status-pill.is-active .agent-status-light {
+  background: var(--accent-bright);
+  box-shadow: 0 0 12px rgba(165, 232, 103, 0.7);
+}
+
+.agent-status-text {
+  line-height: 1;
+}
+
 .monitor-layout,
 .reports-layout {
   display: grid;
@@ -270,6 +323,10 @@ button {
 
 .monitor-layout {
   grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.95fr);
+}
+
+.monitor-image-panel {
+  align-self: start;
 }
 
 .reports-layout {
@@ -297,11 +354,14 @@ button {
 
 .image-frame {
   position: relative;
-  min-height: 340px;
+  height: auto;
+  min-height: 0;
+  aspect-ratio: 16 / 9;
   overflow: hidden;
 }
 
 .camera-frame {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -332,7 +392,6 @@ button {
 }
 
 .image-placeholder span,
-.status-detail,
 .site-area,
 .camera-button span,
 .report-button span,
@@ -360,6 +419,94 @@ button {
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
+}
+
+.status-summary-header > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.incident-line {
+  max-width: 100%;
+  line-height: 1.25;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.status-summary,
+.status-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.status-log,
+.summary-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 180px;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+.log-entry,
+.log-empty {
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.log-entry.is-current {
+  border-color: rgba(103, 211, 197, 0.34);
+  background: linear-gradient(180deg, rgba(18, 50, 67, 0.8), rgba(10, 27, 37, 0.92));
+}
+
+.log-entry-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.log-entry-label,
+.log-entry-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.log-entry-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.log-entry time {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.log-entry p,
+.log-empty {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
 }
 
 .camera-toggle-button {
@@ -418,7 +565,6 @@ button {
 }
 
 .signal-strip,
-.expert-strip,
 .report-meta {
   display: flex;
   flex-wrap: wrap;
@@ -542,7 +688,7 @@ button {
   }
 
   .image-frame {
-    min-height: 300px;
+    aspect-ratio: 16 / 9;
   }
 }
 
@@ -570,6 +716,11 @@ button {
 
   .monitor-header-meta {
     align-items: flex-start;
+  }
+
+  .status-chip-row,
+  .agent-trace-strip {
+    justify-content: flex-start;
   }
 
   .status-grid {

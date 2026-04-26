@@ -23,7 +23,9 @@ class _FakePinecone:
         self.created.append(kwargs)
         self.exists = True
 
-    def describe_index(self, _name: str | None = None, *, name: str | None = None) -> dict[str, object]:
+    def describe_index(
+        self, _name: str | None = None, *, name: str | None = None
+    ) -> dict[str, object]:
         self.describe_calls += 1
         return {
             "host": "demo-index.svc.us-east-1.pinecone.io",
@@ -86,8 +88,8 @@ def test_ensure_index_exists_creates_missing_serverless_index(monkeypatch) -> No
     assert created["name"] == "skymirror-rag"
     assert created["dimension"] == 1024
     assert created["metric"] == "cosine"
-    assert getattr(created["spec"], "cloud") == "aws"
-    assert getattr(created["spec"], "region") == "us-east-1"
+    assert created["spec"].cloud == "aws"
+    assert created["spec"].region == "us-east-1"
 
 
 def test_get_pinecone_retriever_uses_integrated_search(monkeypatch) -> None:
