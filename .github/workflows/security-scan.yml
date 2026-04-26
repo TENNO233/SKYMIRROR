@@ -42,11 +42,10 @@ jobs:
 
       - name: Install package and pip-audit
         run: |
-          pip install --quiet -e ".[dev]"
           pip install --quiet pip-audit
 
       - name: Audit installed packages for known CVEs
-        run: pip-audit --strict --skip-editable
+        run: pip-audit --strict .
 
   # ─────────────────────────────────────────────────────────────────────────
   # 3. SAST – static code security analysis
