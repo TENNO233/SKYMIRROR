@@ -3,25 +3,26 @@
 Usage:
     python scripts/evaluate_alerts.py --alert-dir output/ --radius 500 --output eval_report.json
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 # Allow running as script from project root
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from skymirror.tools.alert.constants import LTA_ALL_ENDPOINTS  # noqa: E402
 from skymirror.tools.alert.lta_lookup import (  # noqa: E402
     _haversine_m,
     fetch_lta_events,
     lookup_lta_events,
     resolve_camera_location,
 )
-from skymirror.tools.alert.constants import LTA_ALL_ENDPOINTS  # noqa: E402
 
 
 def load_alerts(alert_dir: Path) -> list[dict[str, Any]]:
@@ -44,6 +45,7 @@ def load_alerts(alert_dir: Path) -> list[dict[str, Any]]:
 def _extract_camera_id(image_path: str) -> str | None:
     """Extract camera ID from image path."""
     import re
+
     m = re.search(r"cam(\d+)", image_path)
     return m.group(1) if m else None
 
@@ -111,12 +113,14 @@ def evaluate_alerts(
             uncorroborated += 1
             status = "uncorroborated"
 
-        per_alert_details.append({
-            "alert_id": alert.get("alert_id"),
-            "domain": alert.get("domain"),
-            "status": status,
-            "match_count": len(lta.get("matches", [])) if lta else 0,
-        })
+        per_alert_details.append(
+            {
+                "alert_id": alert.get("alert_id"),
+                "domain": alert.get("domain"),
+                "status": status,
+                "match_count": len(lta.get("matches", [])) if lta else 0,
+            }
+        )
 
     evaluable = len(alerts) - api_unavailable
     corroboration_rate = (corroborated / evaluable) if evaluable > 0 else 0.0
@@ -126,7 +130,7 @@ def evaluate_alerts(
     undetected = _find_undetected_events(alerts, radius_m)
 
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "total_alerts": len(alerts),
         "corroborated": corroborated,
         "partially_matched": partially_matched,
@@ -206,22 +210,28 @@ def _find_undetected_events(
         if key in matched_keys:
             continue  # already captured by some alert
 
-        undetected.append({
-            "event_type": event.event_type,
-            "description": event.description,
-            "source_api": event.source_api,
-            "location": {"lat": event.latitude, "lng": event.longitude},
-            "nearest_camera": nearest_cid,
-            "distance_m": round(nearest_dist, 1),
-        })
+        undetected.append(
+            {
+                "event_type": event.event_type,
+                "description": event.description,
+                "source_api": event.source_api,
+                "location": {"lat": event.latitude, "lng": event.longitude},
+                "nearest_camera": nearest_cid,
+                "distance_m": round(nearest_dist, 1),
+            }
+        )
 
     return undetected
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Evaluate Alert Agent output vs LTA ground truth.")
-    parser.add_argument("--alert-dir", type=Path, required=True, help="Directory with alert JSON files")
-    parser.add_argument("--radius", type=float, default=500.0, help="Match radius in metres (default: 500)")
+    parser.add_argument(
+        "--alert-dir", type=Path, required=True, help="Directory with alert JSON files"
+    )
+    parser.add_argument(
+        "--radius", type=float, default=500.0, help="Match radius in metres (default: 500)"
+    )
     parser.add_argument("--output", type=Path, default=None, help="Output file for report JSON")
     args = parser.parse_args(argv)
 

@@ -83,7 +83,7 @@ def _build_documents_for_file(
 
     for index, chunk in enumerate(chunks):
         source_key = f"{namespace}:{path.as_posix()}:{index}"
-        doc_id = hashlib.sha1(source_key.encode("utf-8")).hexdigest()
+        doc_id = hashlib.sha256(source_key.encode("utf-8")).hexdigest()
         documents.append(
             Document(
                 page_content=chunk,
@@ -110,7 +110,9 @@ def ingest_namespace(
     clear_first: bool = False,
 ) -> int:
     files = sorted(
-        path for path in source_dir.rglob("*") if path.is_file() and path.suffix.lower() in _SUPPORTED_SUFFIXES
+        path
+        for path in source_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in _SUPPORTED_SUFFIXES
     )
     if not files:
         logger.warning("ingest_namespace: No supported files found in %s", source_dir)
@@ -159,7 +161,9 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
     args = _parse_args()
     chunk_size = _read_int_env("RAG_CHUNK_SIZE", _DEFAULT_CHUNK_SIZE)
     overlap = _read_int_env("RAG_CHUNK_OVERLAP", _DEFAULT_CHUNK_OVERLAP)

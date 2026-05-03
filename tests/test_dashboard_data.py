@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import shutil
+from pathlib import Path
 from uuid import uuid4
 
 from skymirror.dashboard.data import (
@@ -12,6 +12,7 @@ from skymirror.dashboard.data import (
     read_report_detail,
 )
 from skymirror.tools.dashboard_status import (
+    load_runtime_status,
     set_runtime_active_cameras,
     write_camera_runtime_status,
 )
@@ -45,7 +46,9 @@ def _build_paths(tmp_path: Path) -> DashboardPaths:
             "area_or_key_landmark": "BKE (Woodlands Checkpoint Entrance)",
         },
     ]
-    (sources_dir / "traffic_camera_reference.json").write_text(json.dumps(reference), encoding="utf-8")
+    (sources_dir / "traffic_camera_reference.json").write_text(
+        json.dumps(reference), encoding="utf-8"
+    )
 
     return DashboardPaths(
         project_root=tmp_path,
@@ -97,13 +100,21 @@ def test_build_dashboard_payload_uses_only_guardrail_approved_frames() -> None:
                         "dispatched_to": ["traffic_police", "ambulance"],
                     }
                 ],
+                "metadata": {
+                    "langsmith": {
+                        "trace_url": "https://smith.langchain.com/o/test/projects/p/test/r/abc123?poll=true",
+                    }
+                },
             },
         )
         set_runtime_active_cameras(paths.runtime_status_path, ["2701", "1703"])
 
         payload = build_dashboard_payload(
             paths,
-            live_images={"1703": "https://example.test/1703.jpg", "2701": "https://example.test/2701.jpg"},
+            live_images={
+                "1703": "https://example.test/1703.jpg",
+                "2701": "https://example.test/2701.jpg",
+            },
         )
 
         assert payload["default_monitor_ids"] == ["2701"]
@@ -115,11 +126,27 @@ def test_build_dashboard_payload_uses_only_guardrail_approved_frames() -> None:
         assert first["image_url"].startswith("/frames/cam1703_latest.jpg")
         assert first["image_candidates"][0].startswith("/frames/cam1703_latest.jpg")
         assert first["status_level"] == "alerting"
-        assert "Collision response" in first["status_summary_text"]
+        assert first["status_summary_text"] == "Traffic accident detected"
+        assert first["status_history"][-1]["message"] == "Collision response under dispatch"
         assert first["analysis_summary_text"] == "Vehicle collision with blockage."
+        assert first["analysis_history"][-1]["summary"] == "Vehicle collision with blockage."
         assert first["dispatch_targets"] == ["traffic_police", "ambulance"]
         assert first["signal_snapshot"]["queueing"] is True
         assert first["active_experts"] == ["safety_expert", "environment_expert"]
+        assert first["current_agents"] == []
+        assert first["active_agents"] == [
+            "image_guardrail",
+            "vlm_agent",
+            "validator_agent",
+            "orchestrator_agent",
+            "safety_expert",
+            "environment_expert",
+            "alert_manager",
+        ]
+        assert (
+            first["langsmith_trace_url"]
+            == "https://smith.langchain.com/o/test/projects/p/test/r/abc123?poll=true"
+        )
         assert first["summary_text"] == "Vehicle collision with blockage."
 
         assert second["camera_id"] == "2701"
@@ -156,8 +183,86 @@ def test_build_dashboard_payload_holds_unapproved_frame_off_monitor() -> None:
         assert camera["image_source"] == "approved_frame_pending"
         assert camera["last_frame_at"] == "Awaiting approved frame"
         assert camera["status_label"] == "Processing"
-        assert "Frame fetched" in camera["status_summary_text"]
-        assert camera["analysis_summary_text"] == "No completed analysis has been published for this camera yet."
+        assert camera["status_summary_text"] == "Analyzing latest frame"
+        assert (
+            camera["analysis_summary_text"]
+            == "No completed analysis has been published for this camera yet."
+        )
+        assert camera["analysis_history"] == []
+        assert camera["current_agents"] == []
+        assert camera["active_agents"] == []
+        assert camera["langsmith_trace_url"] is None
+    finally:
+        shutil.rmtree(case_dir, ignore_errors=True)
+
+
+def test_write_camera_runtime_status_preserves_history_without_duplicates() -> None:
+    case_dir = _make_case_dir("runtime_history")
+    try:
+        paths = _build_paths(case_dir)
+        frame_path = paths.frames_dir / "cam1703_latest.jpg"
+        frame_path.write_bytes(b"jpg")
+
+        write_camera_runtime_status(
+            paths.runtime_status_path,
+            camera_id="1703",
+            backend_status="starting",
+            interval_seconds=20,
+            message="Daemon online. Awaiting first camera fetch.",
+        )
+        write_camera_runtime_status(
+            paths.runtime_status_path,
+            camera_id="1703",
+            backend_status="starting",
+            interval_seconds=20,
+            message="Daemon online. Awaiting first camera fetch.",
+        )
+        write_camera_runtime_status(
+            paths.runtime_status_path,
+            camera_id="1703",
+            backend_status="processing",
+            interval_seconds=20,
+            image_path=str(frame_path),
+            message="Frame fetched. Running guardrail and pipeline analysis.",
+        )
+        write_camera_runtime_status(
+            paths.runtime_status_path,
+            camera_id="1703",
+            backend_status="monitoring",
+            interval_seconds=20,
+            image_path=str(frame_path),
+            message="Frame processed successfully.",
+            final_state={
+                "guardrail_result": {"allowed": True, "status": "allowed"},
+                "validated_text": "Traffic remains steady with no active incident.",
+                "alerts": [],
+            },
+        )
+        write_camera_runtime_status(
+            paths.runtime_status_path,
+            camera_id="1703",
+            backend_status="monitoring",
+            interval_seconds=20,
+            image_path=str(frame_path),
+            message="Frame processed successfully.",
+            final_state={
+                "guardrail_result": {"allowed": True, "status": "allowed"},
+                "validated_text": "Traffic remains steady with no active incident.",
+                "alerts": [],
+            },
+        )
+
+        snapshot = load_runtime_status(paths.runtime_status_path)
+        camera = snapshot["cameras"]["1703"]
+
+        assert [entry["message"] for entry in camera["status_history"]] == [
+            "Daemon online. Awaiting first camera fetch.",
+            "Frame fetched. Running guardrail and pipeline analysis.",
+            "Frame processed successfully.",
+        ]
+        assert [entry["summary"] for entry in camera["analysis_history"]] == [
+            "Traffic remains steady with no active incident."
+        ]
     finally:
         shutil.rmtree(case_dir, ignore_errors=True)
 

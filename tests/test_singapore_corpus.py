@@ -17,7 +17,7 @@ class _FakeClient:
     def __init__(self, payloads: dict[str, bytes] | None = None) -> None:
         self.payloads = payloads or {}
 
-    def __enter__(self) -> "_FakeClient":
+    def __enter__(self) -> _FakeClient:
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -91,7 +91,9 @@ def test_bootstrap_ingests_touched_namespaces(tmp_path: Path, monkeypatch) -> No
     )
     calls: list[tuple[str, Path, bool]] = []
 
-    def _fake_ingest(namespace: str, source_dir: Path, *, chunk_size: int, overlap: int, clear_first: bool) -> int:
+    def _fake_ingest(
+        namespace: str, source_dir: Path, *, chunk_size: int, overlap: int, clear_first: bool
+    ) -> int:
         assert chunk_size == 1200
         assert overlap == 200
         calls.append((namespace, source_dir, clear_first))

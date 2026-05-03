@@ -6,6 +6,7 @@ on any LLM failure.
 
 Used by: skymirror.agents.alert_manager
 """
+
 from __future__ import annotations
 
 import json
@@ -15,14 +16,15 @@ from typing import Any, Literal
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
-from skymirror.tools.alert.constants import SUB_TYPE_MAP
 from skymirror.tools import llm_factory
+from skymirror.tools.alert.constants import SUB_TYPE_MAP
 
 logger = logging.getLogger(__name__)
 
 
 class AlertClassification(BaseModel):
     """Structured output schema for LLM classification."""
+
     sub_type: str
     severity: Literal["low", "medium", "high", "critical"]
     message: str
@@ -76,7 +78,8 @@ def classify(
         if sub_type not in valid_types:
             logger.warning(
                 "LLM returned invalid sub_type %r for domain %r; forcing 'other'.",
-                sub_type, domain,
+                sub_type,
+                domain,
             )
             sub_type = "other"
 
@@ -88,9 +91,13 @@ def classify(
 
     except Exception as exc:
         logger.warning("Classification LLM failed: %s — using fallback.", exc)
-        first_desc = findings[0].get("description", "Unknown event") if findings else "Unknown event"
+        first_desc = (
+            findings[0].get("description", "Unknown event") if findings else "Unknown event"
+        )
         return {
             "sub_type": "other",
-            "severity": expert_severity if expert_severity in ("low", "medium", "high", "critical") else "medium",
+            "severity": expert_severity
+            if expert_severity in ("low", "medium", "high", "critical")
+            else "medium",
             "message": f"{domain} alert: {first_desc}",
         }

@@ -1,0 +1,20 @@
+{
+  "version": "2026-04-19.v1",
+  "commands": {
+    "tests": "python3.11 -m pytest",
+    "offline_eval": "python3.11 -m scripts.evaluate_runtime"
+  },
+  "thresholds": {
+    "schema_valid_rate": 1.0,
+    "guardrail_regression_rate": 0.0,
+    "validator_regression_rate": 0.0,
+    "expert_routing_regression_rate": 0.0,
+    "alert_evidence_completeness_rate": 1.0,
+    "report_generation_success_rate": 1.0
+  },
+  "release_gates": [
+    "pytest_pass",
+    "offline_eval_pass",
+    "versioned_changes_require_eval"
+  ]
+}

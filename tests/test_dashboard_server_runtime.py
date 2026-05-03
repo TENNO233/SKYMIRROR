@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import shutil
+from pathlib import Path
 from uuid import uuid4
 
 from skymirror.dashboard.data import DashboardPaths
@@ -46,7 +46,9 @@ def _build_paths(tmp_path: Path) -> DashboardPaths:
             "area_or_key_landmark": "BKE (Woodlands Checkpoint Entrance)",
         },
     ]
-    (sources_dir / "traffic_camera_reference.json").write_text(json.dumps(reference), encoding="utf-8")
+    (sources_dir / "traffic_camera_reference.json").write_text(
+        json.dumps(reference), encoding="utf-8"
+    )
 
     return DashboardPaths(
         project_root=tmp_path,
