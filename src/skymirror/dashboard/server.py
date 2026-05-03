@@ -190,13 +190,15 @@ class DashboardHTTPServer(ThreadingHTTPServer):
         dashboard_paths: DashboardPaths,
         runtime_manager: DashboardRuntimeManager,
     ) -> None:
-        super().__init__(server_address, handler_class)
         self.dashboard_paths = dashboard_paths
         self.live_cache = LiveCameraCache()
         self.runtime_manager = runtime_manager
+        super().__init__(server_address, handler_class)
 
     def server_close(self) -> None:
-        self.runtime_manager.shutdown()
+        runtime_manager = getattr(self, "runtime_manager", None)
+        if runtime_manager is not None:
+            runtime_manager.shutdown()
         super().server_close()
 
 

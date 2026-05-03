@@ -22,3 +22,10 @@ Copy `.env.example` to `.env`, fill in your real keys, and run the app with `pyt
 
 The runtime writes one `RunRecord` JSONL entry per processed frame under `data/oa_log/`.
 Governance controls live in `governance/policy.yaml`, and offline release checks can be evaluated with `python -m scripts.evaluate_runtime`.
+
+### AI Security
+
+An AI-focused risk register for the current pipeline is available at
+`governance/AI_SECURITY_RISK_REGISTER.md`. It documents identified risks,
+existing controls in the repository, and recommended mitigation strategies for
+production hardening.
