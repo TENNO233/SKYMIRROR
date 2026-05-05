@@ -1,0 +1,42 @@
+version: 2
+
+updates:
+  # Python dependencies – weekly PRs for supply-chain hygiene
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+    open-pull-requests-limit: 5
+    groups:
+      langchain:
+        patterns:
+          - "langchain*"
+          - "langgraph*"
+      openai:
+        patterns:
+          - "openai"
+          - "langchain-openai"
+      security:
+        patterns:
+          - "cryptography"
+          - "certifi"
+          - "urllib3"
+          - "requests"
+          - "httpx"
+    labels:
+      - "dependencies"
+      - "security"
+
+  # GitHub Actions – keep action versions pinned and up-to-date
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"

@@ -3,6 +3,7 @@
 Shared between SKYMIRROR's non-VLM agents. By default these agents use
 OpenAI GPT-5.4 Mini unless an explicit provider override is set.
 """
+
 from __future__ import annotations
 
 import logging
@@ -49,9 +50,8 @@ def get_llm(temperature: float = 0.3) -> Any:
         return build_openai_chat_model(temperature=temperature)
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
-        return ChatAnthropic(
-            model_name="claude-sonnet-4-6", temperature=temperature
-        )
+
+        return ChatAnthropic(model_name="claude-sonnet-4-6", temperature=temperature)
     raise ValueError(f"Unknown LLM_PROVIDER: {provider!r}")
 
 
@@ -75,6 +75,7 @@ def narrate(prompt: str, fallback: str, *, llm: Any | None = None) -> str:
             return f"{fallback}\n\n⚠️ LLM narration unavailable: {exc}"
     try:
         from langchain_core.messages import HumanMessage
+
         response = llm.invoke([HumanMessage(content=prompt)])
         content = getattr(response, "content", None)
         return content if isinstance(content, str) and content.strip() else fallback

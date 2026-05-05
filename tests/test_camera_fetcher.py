@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import shutil
+from pathlib import Path
 from uuid import uuid4
 
 from skymirror.tools.camera_fetcher import fetch_latest_frame, publish_latest_frame

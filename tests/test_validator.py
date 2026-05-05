@@ -76,10 +76,82 @@ def test_validator_agent_node_cross_checks_single_output(monkeypatch: pytest.Mon
     )
 
     assert result["validated_text"] == (
-        "Two cars are stopped at a junction with clear lane markings."
+        "Scene assessment: Two cars are stopped at a junction with clear lane markings. "
+        "Government relevance: no immediate enforcement, safety, or maintenance action "
+        "is indicated; routine monitoring is sufficient."
     )
     assert result["validated_signals"]["vehicle_count"] == 2
     assert result["validated_scene"]["road_features"] == ["junction", "lane markings"]
     assert result["metadata"]["validator"]["provider"] == "openai"
     assert result["metadata"]["validator"]["review_mode"] == "image_cross_check"
+    assert result["metadata"]["validator"]["summary_standard"] == "surveillance_brief_v1"
     assert result["metadata"]["validator"]["input_sources"] == ["vlm_output"]
+
+
+def test_validated_text_from_report_uses_surveillance_brief_for_incident() -> None:
+    summary = validator._validated_text_from_report(
+        ValidatedSceneReport(
+            normalized_description="Collision damage is visible across two lanes.",
+            consensus_observations=[
+                "Two damaged vehicles are stopped in the carriageway.",
+            ],
+            notable_hazards=["debris"],
+            signals=TrafficSceneSignals(
+                vehicle_count=4,
+                stopped_vehicle_count=2,
+                blocked_lanes=2,
+                collision_cue=True,
+            ),
+        )
+    )
+
+    assert summary == (
+        "Scene assessment: Collision damage is visible across two lanes; at least 2 "
+        "blocked lanes are visible. "
+        "Government relevance: immediate safety review is warranted, and traffic "
+        "management attention is warranted because lane capacity appears reduced."
+    )
+
+
+def test_validated_text_from_report_uses_surveillance_brief_for_clear_scene() -> None:
+    summary = validator._validated_text_from_report(
+        ValidatedSceneReport(
+            normalized_description="Traffic is moving steadily through the monitored junction.",
+            consensus_observations=[
+                "Vehicles are moving through the junction.",
+            ],
+            signals=TrafficSceneSignals(
+                vehicle_count=5,
+                stopped_vehicle_count=0,
+                blocked_lanes=0,
+            ),
+        )
+    )
+
+    assert summary == (
+        "Scene assessment: Traffic is moving steadily through the monitored junction. "
+        "Government relevance: no immediate enforcement, safety, or maintenance action "
+        "is indicated; routine monitoring is sufficient."
+    )
+
+
+def test_validated_text_from_report_uses_surveillance_brief_for_congestion() -> None:
+    summary = validator._validated_text_from_report(
+        ValidatedSceneReport(
+            normalized_description="Heavy congestion is visible on the approach lanes.",
+            consensus_observations=[
+                "Multiple vehicles are queueing before the junction.",
+            ],
+            signals=TrafficSceneSignals(
+                vehicle_count=18,
+                stopped_vehicle_count=8,
+                blocked_lanes=0,
+                queueing=True,
+            ),
+        )
+    )
+
+    assert summary == (
+        "Scene assessment: Heavy congestion is visible on the approach lanes. "
+        "Government relevance: continued traffic-flow monitoring is warranted."
+    )

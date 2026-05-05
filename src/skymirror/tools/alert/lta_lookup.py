@@ -6,13 +6,14 @@ OA expert judgments.
 
 Used by: skymirror.agents.alert_manager, scripts/evaluate_alerts.py
 """
+
 from __future__ import annotations
 
 import logging
 import math
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -31,9 +32,11 @@ logger = logging.getLogger(__name__)
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class LtaEvent:
     """A single event from an LTA DataMall endpoint."""
+
     event_type: str
     description: str
     latitude: float
@@ -44,6 +47,7 @@ class LtaEvent:
 @dataclass
 class LtaMatch:
     """An LTA event that matched within the search radius."""
+
     event: LtaEvent
     distance_m: float
     match_type: str  # "location_and_domain" | "location_only"
@@ -52,6 +56,7 @@ class LtaMatch:
 @dataclass
 class LtaCorroboration:
     """Result of querying LTA for events near a camera."""
+
     camera_id: str
     camera_lat: float
     camera_lng: float
@@ -63,6 +68,7 @@ class LtaCorroboration:
 # ---------------------------------------------------------------------------
 # Camera resolution
 # ---------------------------------------------------------------------------
+
 
 def resolve_camera_location(camera_id: str) -> tuple[float, float] | None:
     """Resolve a camera ID to (latitude, longitude) via data.gov.sg.
@@ -110,6 +116,7 @@ def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
 # Event matching
 # ---------------------------------------------------------------------------
 
+
 def match_events(
     cam_lat: float,
     cam_lng: float,
@@ -130,9 +137,7 @@ def match_events(
         dist = _haversine_m(cam_lat, cam_lng, event.latitude, event.longitude)
         if dist <= radius_m:
             match_type = (
-                "location_and_domain"
-                if event.source_api in domain_endpoints
-                else "location_only"
+                "location_and_domain" if event.source_api in domain_endpoints else "location_only"
             )
             matches.append(LtaMatch(event=event, distance_m=round(dist, 1), match_type=match_type))
 
@@ -144,18 +149,21 @@ def match_events(
 # LTA DataMall API fetching
 # ---------------------------------------------------------------------------
 
+
 def _parse_lta_events(data: dict[str, Any], source_api: str) -> list[LtaEvent]:
     """Parse LTA DataMall JSON response into LtaEvent list."""
     events: list[LtaEvent] = []
     for item in data.get("value", []):
         try:
-            events.append(LtaEvent(
-                event_type=item.get("Type", item.get("AlarmID", source_api)),
-                description=item.get("Message", ""),
-                latitude=float(item["Latitude"]),
-                longitude=float(item["Longitude"]),
-                source_api=source_api,
-            ))
+            events.append(
+                LtaEvent(
+                    event_type=item.get("Type", item.get("AlarmID", source_api)),
+                    description=item.get("Message", ""),
+                    latitude=float(item["Latitude"]),
+                    longitude=float(item["Longitude"]),
+                    source_api=source_api,
+                )
+            )
         except (KeyError, ValueError) as exc:
             logger.debug("Skipping malformed LTA event: %s", exc)
     return events
@@ -185,6 +193,7 @@ def fetch_lta_events(endpoint: str) -> list[LtaEvent]:
 # Main lookup function
 # ---------------------------------------------------------------------------
 
+
 def _unavailable(camera_id: str) -> LtaCorroboration:
     """Return a corroboration result indicating API was unavailable."""
     return LtaCorroboration(
@@ -192,7 +201,7 @@ def _unavailable(camera_id: str) -> LtaCorroboration:
         camera_lat=0.0,
         camera_lng=0.0,
         matches=[],
-        queried_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        queried_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         api_available=False,
     )
 
@@ -232,6 +241,6 @@ def lookup_lta_events(
         camera_lat=cam_lat,
         camera_lng=cam_lng,
         matches=matches,
-        queried_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        queried_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         api_available=True,
     )

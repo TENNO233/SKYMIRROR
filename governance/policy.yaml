@@ -1,0 +1,46 @@
+{
+  "version": "2026-04-19.v1",
+  "allowed_models": {
+    "guardrail": ["gpt-5.4-mini"],
+    "vlm": ["gpt-5.4"],
+    "validator": ["gpt-5.4"],
+    "expert": ["gpt-5.4-mini"],
+    "orchestrator": ["gpt-5.4-mini", "gpt-5.4"],
+    "alert": ["gpt-5.4-mini", "gpt-5.4"]
+  },
+  "input_controls": {
+    "allow_local_files": true,
+    "allowed_remote_image_domains": [
+      "api.data.gov.sg",
+      "images.data.gov.sg",
+      "datamall2.mytransport.sg",
+      "datamall.lta.gov.sg",
+      "lta.gov.sg",
+      "www.lta.gov.sg",
+      "onemap.gov.sg",
+      "www.onemap.gov.sg"
+    ]
+  },
+  "rag_controls": {
+    "allowed_namespaces": [
+      "traffic-regulations",
+      "safety-incidents",
+      "road-conditions"
+    ]
+  },
+  "runtime_controls": {
+    "enable_lta_lookup": true,
+    "openai_timeout_seconds": 30,
+    "pinecone_timeout_seconds": 15,
+    "camera_fetch_timeout_seconds": 10
+  },
+  "prompt_security": {
+    "max_validated_text_chars": 4000,
+    "max_expert_input_chars": 6000,
+    "max_alert_message_chars": 1000,
+    "max_history_context_chars": 8000
+  },
+  "telemetry": {
+    "enable_tracing": true
+  }
+}

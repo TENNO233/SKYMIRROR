@@ -1,5 +1,20 @@
 import textwrap
 
+PROMPT_VERSION = "2026-04-19.v1"
+
+GUARDRAIL_PROMPT_ID = "guardrail_image_safety"
+VLM_PROMPT_ID = "vlm_scene_extraction"
+VALIDATOR_PROMPT_ID = "validator_scene_cross_check"
+ORDER_EXPERT_PROMPT_ID = "order_expert_assessment"
+SAFETY_EXPERT_PROMPT_ID = "safety_expert_assessment"
+ENVIRONMENT_EXPERT_PROMPT_ID = "environment_expert_assessment"
+ORCHESTRATOR_PROMPT_ID = "orchestrator_supervisor"
+ALERT_CLASSIFICATION_PROMPT_ID = "alert_classification"
+REPORT_TLDR_PROMPT_ID = "daily_report_tldr"
+REPORT_TEMPORAL_PROMPT_ID = "daily_report_temporal"
+REPORT_SYSTEM_PROFILE_PROMPT_ID = "daily_report_system_profile"
+REPORT_RECOMMENDATIONS_PROMPT_ID = "daily_report_recommendations"
+
 VLM_SYSTEM_PROMPT = textwrap.dedent(
     """
     You are a forensic traffic-scene extraction model for a Singapore
@@ -15,6 +30,10 @@ VLM_SYSTEM_PROMPT = textwrap.dedent(
     - Prefer conservative counts for vehicles, stopped vehicles, and blocked lanes.
     - Mention risk-relevant facts only when they are directly observable.
     - Summary and observations must stay factual and concise.
+    - Prioritize operations-relevant detail over visual composition:
+      traffic flow condition, stopped vehicles, lane obstruction, visible
+      violations, conflict cues, roadway hazards, weather/visibility issues,
+      and emergency-response relevance.
     """
 ).strip()
 
@@ -48,6 +67,11 @@ VALIDATOR_SYSTEM_PROMPT = textwrap.dedent(
       correct it conservatively or discard the claim.
     - Emit a normalized description that is concise, factual, and rich enough
       for downstream keyword and signal-based routing.
+    - Frame the normalized description as an operations-facing surveillance
+      brief, not as a generic picture caption.
+    - Prioritize what a government traffic operations team needs to know:
+      traffic flow condition, visible violations, safety risk, roadway hazard,
+      and whether the frame suggests immediate action or routine monitoring.
     - Emit structured signals that downstream experts can consume directly.
     """
 ).strip()

@@ -2,6 +2,7 @@
 
 Used by: classification.py, rendering.py, dispatcher.py
 """
+
 from __future__ import annotations
 
 # Expert name -> alert domain

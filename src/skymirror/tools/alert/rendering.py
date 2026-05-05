@@ -5,11 +5,12 @@ expert data, returns a complete alert dict ready for dispatch.
 
 Used by: skymirror.agents.alert_manager
 """
+
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
-from typing import Any, TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from skymirror.tools.alert.constants import DEPARTMENT_MAP, DOMAIN_MAP
 
@@ -32,7 +33,7 @@ def render_alert(
     findings: list[dict[str, Any]],
     regulations: list[dict[str, Any]],
     image_path: str,
-    corroboration: "LtaCorroboration | None" = None,
+    corroboration: LtaCorroboration | None = None,
 ) -> dict[str, Any]:
     """Assemble a complete alert dict from classification + expert data.
 
@@ -81,7 +82,7 @@ def render_alert(
         "evidence": evidence,
         "regulations": regulations,
         "department": department,
-        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "image_path": image_path,
         "lta_corroboration": lta_corroboration,
     }

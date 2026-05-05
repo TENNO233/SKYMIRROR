@@ -48,7 +48,9 @@ def test_order_expert_node_uses_retriever_and_model(monkeypatch) -> None:
         ),
     )
 
-    result = experts.order_expert_node({"validated_text": "A car is stopped in a yellow box junction."})
+    result = experts.order_expert_node(
+        {"validated_text": "A car is stopped in a yellow box junction."}
+    )
 
     assert result["expert_results"]["order_expert"]["matched"] is True
     assert result["expert_results"]["order_expert"]["summary"] == (
@@ -91,3 +93,37 @@ def test_environment_expert_returns_empty_assessment_when_no_context(monkeypatch
     )
     assert result["metadata"]["experts"]["environment_expert"]["retrieved_context_count"] == 0
     assert result["metadata"]["experts"]["environment_expert"]["rag_triggered"] is False
+
+
+def test_expert_gracefully_handles_rag_fallback_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        experts,
+        "_load_expert_model_config",
+        lambda: {
+            "api_key": "openai-key",
+            "model": "gpt-5.4-mini",
+            "temperature": 0.0,
+            "max_tokens": 256,
+            "top_k": 5,
+        },
+    )
+    monkeypatch.setattr(
+        experts,
+        "get_pinecone_retriever",
+        lambda **_: (_ for _ in ()).throw(
+            RuntimeError("Environment variable PINECONE_API_KEY is required.")
+        ),
+    )
+
+    result = experts.environment_expert_node(
+        {"validated_text": "Roadway appears ordinary with no confirmed environmental hazard."}
+    )
+
+    assert result["expert_results"]["environment_expert"]["matched"] is False
+    assert result["expert_results"]["environment_expert"]["summary"] == (
+        "No environment-related issues detected."
+    )
+    assert result["metadata"]["experts"]["environment_expert"]["rag_triggered"] is False
+    assert result["metadata"]["experts"]["environment_expert"]["rag_error"] == (
+        "Environment variable PINECONE_API_KEY is required."
+    )

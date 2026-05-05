@@ -21,29 +21,35 @@ Both passes apply hard code-level filters on the LLM's output:
   • Evaluate pass strips any expert names; falls back to "alert_manager".
 This prevents mode-violating LLM responses from creating routing cycles.
 """
+
 from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from skymirror.agents.prompts import ORCHESTRATOR_SYSTEM_PROMPT
+from skymirror.agents.prompts import (
+    ORCHESTRATOR_PROMPT_ID,
+    ORCHESTRATOR_SYSTEM_PROMPT,
+    PROMPT_VERSION,
+)
 from skymirror.graph.state import SkymirrorState
 from skymirror.tools import llm_factory
+from skymirror.tools.governance import model_allowed, policy_version
 
 logger = logging.getLogger(__name__)
 
-_EXPERT_NODES: frozenset[str] = frozenset(
-    {"order_expert", "safety_expert", "environment_expert"}
-)
+_EXPERT_NODES: frozenset[str] = frozenset({"order_expert", "safety_expert", "environment_expert"})
 _ALL_EXPERTS: list[str] = sorted(_EXPERT_NODES)  # deterministic order
 
 
 # ---------------------------------------------------------------------------
 # Structured output schema
 # ---------------------------------------------------------------------------
+
 
 class OrchestratorDecision(BaseModel):
     """LLM-structured routing decision from the Orchestrator."""
@@ -71,6 +77,7 @@ class OrchestratorDecision(BaseModel):
 # ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
+
 
 def _build_dispatch_prompt(
     validated_scene: dict[str, Any],
@@ -117,6 +124,7 @@ def _build_evaluate_prompt(expert_results: dict[str, Any]) -> str:
 # LLM invocation
 # ---------------------------------------------------------------------------
 
+
 def _invoke_orchestrator_llm(state: SkymirrorState) -> OrchestratorDecision:
     from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -132,6 +140,9 @@ def _invoke_orchestrator_llm(state: SkymirrorState) -> OrchestratorDecision:
         user_content = _build_evaluate_prompt(expert_results)
 
     llm = llm_factory.get_llm(temperature=0.0)
+    model_name = getattr(llm, "model_name", getattr(llm, "model", ""))
+    if model_name and not model_allowed(str(model_name), capability="orchestrator"):
+        raise RuntimeError(f"Model '{model_name}' is not allowed for orchestrator by policy.")
     structured_llm = llm.with_structured_output(OrchestratorDecision)
     return structured_llm.invoke(
         [
@@ -144,6 +155,7 @@ def _invoke_orchestrator_llm(state: SkymirrorState) -> OrchestratorDecision:
 # ---------------------------------------------------------------------------
 # Node function
 # ---------------------------------------------------------------------------
+
 
 def orchestrator_node(state: SkymirrorState) -> dict[str, Any]:
     """
@@ -213,7 +225,24 @@ def orchestrator_node(state: SkymirrorState) -> dict[str, Any]:
             "orchestrator": {
                 "mode": mode,
                 "next_nodes": next_nodes,
-            }
+            },
+            "models": {
+                "orchestrator": {
+                    "model_name": os.getenv("OPENAI_AGENT_MODEL", "gpt-5.4-mini"),
+                    "provider": os.getenv("LLM_PROVIDER", "openai"),
+                }
+            },
+            "prompts": {
+                "orchestrator": {
+                    "prompt_id": ORCHESTRATOR_PROMPT_ID,
+                    "prompt_version": PROMPT_VERSION,
+                }
+            },
+            "policies": {
+                "orchestrator": {
+                    "policy_version": policy_version(),
+                }
+            },
         },
     }
 

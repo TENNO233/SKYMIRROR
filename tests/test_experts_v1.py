@@ -214,7 +214,9 @@ def test_expert_returns_explicit_no_issue_payload() -> None:
 
 
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
-def test_graph_routes_multiple_experts_and_generates_alerts(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_graph_routes_multiple_experts_and_generates_alerts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pytest.importorskip("langgraph")
     import skymirror.graph.graph as graph_module
 

@@ -13,31 +13,28 @@ Run directly for smoke-testing against fixture JSON:
 
     python -m skymirror.agents.alert_manager --fixture single_expert
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import logging
+import os
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from skymirror.agents.prompts import ALERT_CLASSIFICATION_PROMPT_ID, PROMPT_VERSION
 from skymirror.graph.state import SkymirrorState
 from skymirror.tools.alert.classification import classify
 from skymirror.tools.alert.constants import DOMAIN_MAP
 from skymirror.tools.alert.dispatcher import dispatch
 from skymirror.tools.alert.lta_lookup import lookup_lta_events
 from skymirror.tools.alert.rendering import render_alert
+from skymirror.tools.governance import lta_enabled, policy_version
 
 logger = logging.getLogger(__name__)
-
-_EXPERT_TO_TYPE: dict[str, str] = {
-    "order_expert": "traffic_violation",
-    "safety_expert": "safety_incident",
-    "environment_expert": "env_hazard",
-}
 
 _SEVERITY_RANK: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
@@ -60,10 +57,49 @@ def _expert_severity(scenarios: list[dict[str, Any]]) -> str:
     )
 
 
+def _normalize_scenarios(result: dict[str, Any]) -> list[dict[str, Any]]:
+    scenarios = result.get("scenarios")
+    if isinstance(scenarios, list):
+        return [dict(item) for item in scenarios if isinstance(item, dict)]
+
+    findings = result.get("findings")
+    if not isinstance(findings, list):
+        return []
+
+    severity = str(result.get("severity", "medium"))
+    confidence = result.get("confidence", "medium")
+    normalized: list[dict[str, Any]] = []
+    for index, finding in enumerate(findings, start=1):
+        if not isinstance(finding, dict):
+            continue
+        normalized.append(
+            {
+                "name": f"legacy_finding_{index}",
+                "reason": str(finding.get("description", "")).strip(),
+                "confidence": confidence,
+                "severity": severity,
+                "evidence": list(finding.get("evidence", []))
+                if isinstance(finding.get("evidence"), list)
+                else [],
+            }
+        )
+    return normalized
+
+
+def _citations_from_result(
+    result: dict[str, Any],
+    fallback_citations: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    citations = result.get("citations")
+    if isinstance(citations, list) and citations:
+        return [dict(item) for item in citations if isinstance(item, dict)]
+    return [dict(item) for item in (fallback_citations or []) if isinstance(item, dict)]
+
+
 def generate_alerts(
     expert_results: dict[str, Any],
     image_path: str,
-    rag_citations: list[dict[str, Any]],
+    rag_citations: list[dict[str, Any]] | None = None,
     output_dir: Path | str = "data/alerts",
     metadata: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
@@ -90,6 +126,7 @@ def generate_alerts(
     if not expert_results:
         logger.info("alert_manager: No expert results provided; returning empty.")
         return []
+    _ = metadata
 
     logger.info(
         "alert_manager: Processing results from %d expert(s): %s",
@@ -101,7 +138,7 @@ def generate_alerts(
 
     for expert_name, result in expert_results.items():
         # ExpertResult stores detected issues under "scenarios"
-        scenarios: list[dict[str, Any]] = result.get("scenarios", [])
+        scenarios = _normalize_scenarios(result if isinstance(result, dict) else {})
 
         if not scenarios:
             logger.info("alert_manager: Skipping %s (no scenarios).", expert_name)
@@ -131,14 +168,19 @@ def generate_alerts(
 
         # Tool 2: LTA corroboration (independent official data feed)
         camera_id = _extract_camera_id(image_path)
-        corroboration = lookup_lta_events(camera_id, domain) if camera_id else None
+        corroboration = None
+        if camera_id and lta_enabled():
+            corroboration = lookup_lta_events(camera_id, domain)
 
         # Tool 3: Template-based alert assembly
         alert = render_alert(
             expert_name=expert_name,
             classification=classification,
             findings=findings,
-            regulations=rag_citations,
+            regulations=_citations_from_result(
+                result if isinstance(result, dict) else {},
+                rag_citations,
+            ),
             image_path=image_path,
             corroboration=corroboration,
         )
@@ -176,10 +218,41 @@ def alert_manager_node(state: SkymirrorState) -> dict[str, Any]:
         expert_results=expert_results,
         image_path=image_path,
         rag_citations=[],
+        metadata=state.get("metadata", {}),
     )
 
     logger.info("alert_manager_node: Emitting %d alert(s) to state.", len(alerts))
-    return {"alerts": alerts}
+    return {
+        "alerts": alerts,
+        "metadata": {
+            "alert_manager": {
+                "alerts_generated": len(alerts),
+                "lta_lookup_enabled": lta_enabled(),
+            },
+            "models": {
+                "alert_manager": {
+                    "model_name": os.getenv("OPENAI_AGENT_MODEL", "gpt-5.4-mini"),
+                    "provider": os.getenv("LLM_PROVIDER", "openai"),
+                }
+            },
+            "prompts": {
+                "alert_manager": {
+                    "prompt_id": ALERT_CLASSIFICATION_PROMPT_ID,
+                    "prompt_version": PROMPT_VERSION,
+                }
+            },
+            "policies": {
+                "alert_manager": {
+                    "policy_version": policy_version(),
+                }
+            },
+            "external_calls": {
+                "lta_lookup": {
+                    "status": "enabled" if lta_enabled() else "disabled",
+                }
+            },
+        },
+    }
 
 
 # ---------------------------------------------------------------------------

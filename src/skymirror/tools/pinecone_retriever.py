@@ -8,7 +8,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.documents import Document
 
@@ -23,10 +23,10 @@ _DEFAULT_PINECONE_READY_TIMEOUT_SECONDS = 180
 _INDEX_PROBE_TEXT = "skymirror pinecone dimension probe"
 
 _lock = threading.Lock()
-_pinecone_client: Optional[object] = None
-_index: Optional[object] = None
-_index_host: Optional[str] = None
-_index_description: Optional[Any] = None
+_pinecone_client: object | None = None
+_index: object | None = None
+_index_host: str | None = None
+_index_description: Any | None = None
 
 
 def _read_required_env(name: str) -> str:
@@ -98,7 +98,7 @@ def _get_index_description() -> Any:
     return _index_description
 
 
-def _get_embeddings(model: Optional[str] = None) -> Any:
+def _get_embeddings(model: str | None = None) -> Any:
     from langchain_openai import OpenAIEmbeddings
 
     resolved_model = (
@@ -191,7 +191,9 @@ def _resolve_index_dimension() -> int:
         try:
             return int(explicit_dimension)
         except ValueError as exc:
-            raise ValueError("Environment variable PINECONE_INDEX_DIMENSION must be an integer.") from exc
+            raise ValueError(
+                "Environment variable PINECONE_INDEX_DIMENSION must be an integer."
+            ) from exc
 
     probe_vector = _get_embeddings().embed_query(_INDEX_PROBE_TEXT)
     dimension = len(probe_vector)
@@ -214,7 +216,9 @@ def _wait_for_index_ready(pc: Any, index_name: str) -> Any:
             return latest_description
         time.sleep(2)
 
-    raise TimeoutError(f"Pinecone index '{index_name}' was not ready within {timeout_seconds} seconds.")
+    raise TimeoutError(
+        f"Pinecone index '{index_name}' was not ready within {timeout_seconds} seconds."
+    )
 
 
 def _ensure_index_exists(pc: Any, index_name: str) -> None:
@@ -231,7 +235,8 @@ def _ensure_index_exists(pc: Any, index_name: str) -> None:
     deletion_protection = _read_optional_env("PINECONE_DELETION_PROTECTION", "disabled")
 
     logger.info(
-        "pinecone_retriever: Creating Pinecone index '%s' with dimension=%d cloud=%s region=%s metric=%s.",
+        "pinecone_retriever: Creating Pinecone index '%s' with dimension=%d "
+        "cloud=%s region=%s metric=%s.",
         index_name,
         dimension,
         cloud,
@@ -300,7 +305,9 @@ def _sanitize_metadata_value(value: Any) -> Any:
 
 
 class _IntegratedPineconeRetriever:
-    def __init__(self, index: Any, namespace: str, top_k: int, input_field: str, text_field: str) -> None:
+    def __init__(
+        self, index: Any, namespace: str, top_k: int, input_field: str, text_field: str
+    ) -> None:
         self.index = index
         self.namespace = namespace
         self.top_k = top_k
@@ -342,7 +349,8 @@ def get_pinecone_vector_store(
     """Return a PineconeVectorStore for the requested namespace."""
     if _get_integrated_text_field():
         raise RuntimeError(
-            "The configured Pinecone index uses integrated embeddings; vector-store access is not used."
+            "The configured Pinecone index uses integrated embeddings; vector-store "
+            "access is not used."
         )
 
     from langchain_pinecone import PineconeVectorStore
@@ -372,7 +380,8 @@ def get_pinecone_retriever(
             text_field=text_field,
         )
         logger.debug(
-            "get_pinecone_retriever: namespace=%s top_k=%d using integrated fields input=%s text=%s",
+            "get_pinecone_retriever: namespace=%s top_k=%d using integrated fields "
+            "input=%s text=%s",
             namespace,
             k,
             input_field,
@@ -393,7 +402,7 @@ def upsert_documents_to_namespace(
     namespace: str,
     documents: list[Document],
     *,
-    ids: Optional[list[str]] = None,
+    ids: list[str] | None = None,
     embedding_model: str | None = None,
 ) -> list[str]:
     """Upsert LangChain documents into a Pinecone namespace."""
@@ -424,7 +433,8 @@ def upsert_documents_to_namespace(
             inserted_ids.extend(batch_ids)
 
         logger.info(
-            "upsert_documents_to_namespace: Upserted %d document chunk(s) to namespace '%s' via integrated embeddings.",
+            "upsert_documents_to_namespace: Upserted %d document chunk(s) to "
+            "namespace '%s' via integrated embeddings.",
             len(inserted_ids),
             namespace,
         )
@@ -447,7 +457,9 @@ def clear_namespace(namespace: str) -> None:
         index.delete(delete_all=True, namespace=namespace)
     except Exception as exc:
         if exc.__class__.__name__ == "NotFoundException":
-            logger.info("clear_namespace: Namespace '%s' does not exist yet; skipping clear.", namespace)
+            logger.info(
+                "clear_namespace: Namespace '%s' does not exist yet; skipping clear.", namespace
+            )
             return
         raise
     logger.info("clear_namespace: Cleared namespace '%s'.", namespace)

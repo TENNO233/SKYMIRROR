@@ -18,9 +18,20 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
-from skymirror.agents.prompts import GUARDRAIL_SYSTEM_PROMPT, VLM_SYSTEM_PROMPT
+from skymirror.agents.prompts import (
+    GUARDRAIL_PROMPT_ID,
+    GUARDRAIL_SYSTEM_PROMPT,
+    PROMPT_VERSION,
+    VLM_PROMPT_ID,
+    VLM_SYSTEM_PROMPT,
+)
 from skymirror.agents.scene_schema import VlmSceneReport, coerce_model
 from skymirror.graph.state import SkymirrorState
+from skymirror.tools.governance import (
+    model_allowed,
+    policy_version,
+    validate_image_source,
+)
 from skymirror.tools.llm_factory import build_openai_chat_model, get_openai_agent_model
 
 logger = logging.getLogger(__name__)
@@ -39,9 +50,13 @@ _VLM_USER_PROMPT = (
     "Return one JSON object with exactly these top-level fields:\n"
     "- summary: 1 to 3 sentences describing the traffic scene using only directly visible facts.\n"
     "- direct_observations: 4 to 10 short atomic observations.\n"
-    "- road_features: visible roadway layout or markings such as intersection, junction, crosswalk, stop line, shoulder, lane arrows, bus lane, median, yellow box junction.\n"
-    "- traffic_controls: visible signals or signs such as red traffic light, green traffic light, turn arrow, pedestrian signal, overhead sign.\n"
-    "- notable_hazards: directly visible hazards or disruptions such as standing water, debris, blocked lane, collision damage, poor visibility.\n"
+    "- road_features: visible roadway layout or markings such as intersection, "
+    "junction, crosswalk, stop line, shoulder, lane arrows, bus lane, median, "
+    "yellow box junction.\n"
+    "- traffic_controls: visible signals or signs such as red traffic light, green "
+    "traffic light, turn arrow, pedestrian signal, overhead sign.\n"
+    "- notable_hazards: directly visible hazards or disruptions such as standing "
+    "water, debris, blocked lane, collision damage, poor visibility.\n"
     "- signals: object with these exact fields and conservative values only:\n"
     "  vehicle_count, stopped_vehicle_count, pedestrian_present, blocked_lanes, queueing,\n"
     "  water_present, construction_present, obstacle_present, low_visibility,\n"
@@ -131,7 +146,7 @@ def _read_required_env(name: str) -> str:
 
 
 def _load_vlm_config() -> VisionConfig:
-    return VisionConfig(
+    config = VisionConfig(
         api_key=_read_required_env("OPENAI_API_KEY"),
         model=os.getenv(
             "OPENAI_VLM_MODEL",
@@ -141,10 +156,13 @@ def _load_vlm_config() -> VisionConfig:
         max_tokens=_read_int_env("VLM_MAX_TOKENS", _DEFAULT_MAX_TOKENS),
         temperature=_read_float_env("VLM_TEMPERATURE", _DEFAULT_TEMPERATURE),
     )
+    if not model_allowed(config.model, capability="vlm"):
+        raise RuntimeError(f"Model '{config.model}' is not allowed for VLM by policy.")
+    return config
 
 
 def _load_guardrail_config() -> OpenAIGuardrailConfig:
-    return OpenAIGuardrailConfig(
+    config = OpenAIGuardrailConfig(
         api_key=_read_required_env("OPENAI_API_KEY"),
         model=os.getenv(
             "OPENAI_GUARDRAIL_MODEL",
@@ -154,6 +172,9 @@ def _load_guardrail_config() -> OpenAIGuardrailConfig:
         max_tokens=_read_int_env("GUARDRAIL_MAX_TOKENS", _DEFAULT_GUARDRAIL_MAX_TOKENS),
         temperature=_read_float_env("GUARDRAIL_TEMPERATURE", 0.0),
     )
+    if not model_allowed(config.model, capability="guardrail"):
+        raise RuntimeError(f"Model '{config.model}' is not allowed for guardrail by policy.")
+    return config
 
 
 def _is_remote_image(image_path: str) -> bool:
@@ -163,6 +184,7 @@ def _is_remote_image(image_path: str) -> bool:
 
 def _read_image_bytes(image_path: str) -> tuple[bytes, str]:
     if _is_remote_image(image_path):
+        validate_image_source(image_path)
         try:
             response = httpx.get(
                 image_path,
@@ -240,7 +262,9 @@ def _coerce_scene_report(value: Any) -> VlmSceneReport:
     return coerce_model(value, VlmSceneReport)
 
 
-def _classify_image_safety(image: ImagePayload, config: OpenAIGuardrailConfig) -> GuardrailAssessment:
+def _classify_image_safety(
+    image: ImagePayload, config: OpenAIGuardrailConfig
+) -> GuardrailAssessment:
     llm = build_openai_chat_model(
         temperature=config.temperature,
         model=config.model,
@@ -319,10 +343,29 @@ def image_guardrail_node(state: SkymirrorState) -> dict[str, Any]:
                     "status": result["status"],
                     "reason": result["reason"],
                     "categories": result["categories"],
-                }
+                },
+                "models": {},
+                "prompts": {
+                    "guardrail": {
+                        "prompt_id": GUARDRAIL_PROMPT_ID,
+                        "prompt_version": PROMPT_VERSION,
+                    }
+                },
+                "policies": {
+                    "guardrail": {
+                        "policy_version": policy_version(),
+                    }
+                },
+                "external_calls": {
+                    "image_input": {
+                        "status": "failed",
+                        "reason": result["reason"],
+                    }
+                },
             },
         }
 
+    config: OpenAIGuardrailConfig | None = None
     try:
         config = _load_guardrail_config()
         assessment = _classify_image_safety(image, config)
@@ -337,7 +380,7 @@ def image_guardrail_node(state: SkymirrorState) -> dict[str, Any]:
             "metadata": {
                 "guardrail": {
                     "provider": "openai",
-                    "model": config.model,
+                    "model": config.model if config is not None else "",
                     "source": image.source,
                     "media_type": image.media_type,
                     "width": image.width,
@@ -347,7 +390,32 @@ def image_guardrail_node(state: SkymirrorState) -> dict[str, Any]:
                     "status": result["status"],
                     "reason": result["reason"],
                     "categories": result["categories"],
-                }
+                },
+                "models": {
+                    "guardrail": {
+                        "model_name": config.model,
+                        "provider": "openai",
+                    }
+                },
+                "prompts": {
+                    "guardrail": {
+                        "prompt_id": GUARDRAIL_PROMPT_ID,
+                        "prompt_version": PROMPT_VERSION,
+                    }
+                },
+                "policies": {
+                    "guardrail": {
+                        "policy_version": policy_version(),
+                    }
+                },
+                "external_calls": {
+                    "guardrail_api": {
+                        "provider": "openai",
+                        "status": "failed",
+                        "model_name": config.model if config is not None else "",
+                        "reason": str(exc),
+                    }
+                },
             },
         }
 
@@ -376,7 +444,31 @@ def image_guardrail_node(state: SkymirrorState) -> dict[str, Any]:
                 "status": result["status"],
                 "reason": result["reason"],
                 "categories": result["categories"],
-            }
+            },
+            "models": {
+                "guardrail": {
+                    "model_name": config.model,
+                    "provider": "openai",
+                }
+            },
+            "prompts": {
+                "guardrail": {
+                    "prompt_id": GUARDRAIL_PROMPT_ID,
+                    "prompt_version": PROMPT_VERSION,
+                }
+            },
+            "policies": {
+                "guardrail": {
+                    "policy_version": policy_version(),
+                }
+            },
+            "external_calls": {
+                "guardrail_api": {
+                    "provider": "openai",
+                    "status": "success",
+                    "model_name": config.model,
+                }
+            },
         },
     }
 
@@ -410,6 +502,30 @@ def vlm_agent_node(state: SkymirrorState) -> dict[str, Any]:
                 "byte_count": image.byte_count,
                 "summary_chars": len(report.summary),
                 "observation_count": len(report.direct_observations),
-            }
+            },
+            "models": {
+                "vlm": {
+                    "model_name": config.model,
+                    "provider": "openai",
+                }
+            },
+            "prompts": {
+                "vlm": {
+                    "prompt_id": VLM_PROMPT_ID,
+                    "prompt_version": PROMPT_VERSION,
+                }
+            },
+            "policies": {
+                "vlm": {
+                    "policy_version": policy_version(),
+                }
+            },
+            "external_calls": {
+                "vlm_api": {
+                    "provider": "openai",
+                    "status": "success",
+                    "model_name": config.model,
+                }
+            },
         },
     }

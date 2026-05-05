@@ -5,11 +5,12 @@ a single dispatch_log.jsonl tracks all dispatches for the session.
 
 Used by: skymirror.agents.alert_manager
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,7 @@ def _extract_date_partition(alert: dict[str, Any]) -> str:
     ts = alert.get("timestamp", "")
     if isinstance(ts, str) and len(ts) >= 10 and ts[4] == "-" and ts[7] == "-":
         return ts[:10]
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(UTC).date().isoformat()
 
 
 def dispatch(alert: dict[str, Any], output_dir: Path | str) -> None:
@@ -64,7 +65,7 @@ def dispatch(alert: dict[str, Any], output_dir: Path | str) -> None:
     log_entry = {
         "alert_id": alert_id,
         "department": alert.get("department", "unknown"),
-        "dispatched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "dispatched_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "status": "simulated",
     }
 

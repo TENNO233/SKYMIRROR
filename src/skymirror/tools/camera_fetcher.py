@@ -46,10 +46,9 @@ from __future__ import annotations
 
 import logging
 import shutil
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import requests
 from langsmith import traceable
@@ -86,7 +85,8 @@ def _trace_fetch_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _build_frame_filename(camera_id: str, ts: Optional[datetime] = None) -> str:
+
+def _build_frame_filename(camera_id: str, ts: datetime | None = None) -> str:
     """
     Build a deterministic filename for a camera frame.
 
@@ -98,7 +98,7 @@ def _build_frame_filename(camera_id: str, ts: Optional[datetime] = None) -> str:
         Filename string, e.g. ``"cam4798_20240412_143000.jpg"``.
     """
     if ts is None:
-        ts = datetime.now(tz=timezone.utc)
+        ts = datetime.now(tz=UTC)
     return f"cam{camera_id}_{ts.strftime('%Y%m%d_%H%M%S')}.jpg"
 
 
@@ -116,7 +116,10 @@ def _build_staging_filename(camera_id: str) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
-def purge_old_frames(save_dir: Path, camera_id: str, max_age_hours: int = _DEFAULT_MAX_AGE_HOURS) -> int:
+
+def purge_old_frames(
+    save_dir: Path, camera_id: str, max_age_hours: int = _DEFAULT_MAX_AGE_HOURS
+) -> int:
     """
     Delete timestamped frame files older than `max_age_hours`.
 
@@ -131,12 +134,12 @@ def purge_old_frames(save_dir: Path, camera_id: str, max_age_hours: int = _DEFAU
     Returns:
         Number of files deleted.
     """
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=max_age_hours)
+    cutoff = datetime.now(tz=UTC) - timedelta(hours=max_age_hours)
     deleted = 0
 
     for frame_file in save_dir.glob(f"cam{camera_id}_[0-9]*.jpg"):
         try:
-            mtime = datetime.fromtimestamp(frame_file.stat().st_mtime, tz=timezone.utc)
+            mtime = datetime.fromtimestamp(frame_file.stat().st_mtime, tz=UTC)
             if mtime < cutoff:
                 frame_file.unlink()
                 deleted += 1
@@ -162,7 +165,7 @@ def fetch_latest_frame(
     *,
     keep_history: bool = True,
     max_age_hours: int = _DEFAULT_MAX_AGE_HOURS,
-) -> Optional[str]:
+) -> str | None:
     """
     Fetch the latest snapshot for `camera_id` from the LTA API and save it.
 
@@ -277,7 +280,7 @@ def fetch_latest_frame(
         return None
 
     # --- Step 4: Persist to disk ---------------------------------------------
-    now_utc = datetime.now(tz=timezone.utc)
+    now_utc = datetime.now(tz=UTC)
 
     # Timestamped copy (retained for history / debugging)
     if keep_history:
@@ -305,7 +308,7 @@ def fetch_latest_frame(
     return str(processing_path)
 
 
-def publish_latest_frame(camera_id: str, save_dir: Path, source_path: str | Path) -> Optional[str]:
+def publish_latest_frame(camera_id: str, save_dir: Path, source_path: str | Path) -> str | None:
     """Promote an approved frame into the stable ``cam<id>_latest.jpg`` slot."""
     save_dir = save_dir.resolve()
     source = Path(source_path).expanduser().resolve()
@@ -313,12 +316,20 @@ def publish_latest_frame(camera_id: str, save_dir: Path, source_path: str | Path
 
     try:
         if not source.is_file():
-            logger.warning("publish_latest_frame: Source frame missing for camera %s: %s", camera_id, source)
+            logger.warning(
+                "publish_latest_frame: Source frame missing for camera %s: %s", camera_id, source
+            )
             return None
         shutil.copyfile(source, latest_path)
     except OSError as exc:
-        logger.error("publish_latest_frame: Could not publish %s -> %s — %s", source, latest_path, exc)
+        logger.error(
+            "publish_latest_frame: Could not publish %s -> %s — %s", source, latest_path, exc
+        )
         return None
 
-    logger.debug("publish_latest_frame: Promoted approved frame for camera %s -> %s", camera_id, latest_path.name)
+    logger.debug(
+        "publish_latest_frame: Promoted approved frame for camera %s -> %s",
+        camera_id,
+        latest_path.name,
+    )
     return str(latest_path)

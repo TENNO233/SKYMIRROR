@@ -80,6 +80,7 @@ class ExpertResult(TypedDict, total=False):
     summary: str
     urgent: bool
     scenarios: list[ExpertScenario]
+    citations: list[dict[str, Any]]
 
 
 class HistoryFrame(TypedDict, total=False):
@@ -95,6 +96,7 @@ class HistoryFrame(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 # State Schema
 # ---------------------------------------------------------------------------
+
 
 class SkymirrorState(TypedDict, total=False):
     """
@@ -136,11 +138,14 @@ class SkymirrorState(TypedDict, total=False):
     """
 
     workflow_mode: WorkflowMode
+    run_id: str
+    camera_id: str
     image_path: str
     target_date: str
     oa_log_dir: str
     output_dir: str
     report_path: str
+    policy_snapshot: dict[str, Any]
     guardrail_result: dict[str, Any]
     vlm_output: dict[str, Any]
     validated_scene: dict[str, Any]

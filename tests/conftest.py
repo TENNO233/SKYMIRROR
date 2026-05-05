@@ -1,7 +1,7 @@
 """Shared pytest fixtures for SKYMIRROR agent tests."""
+
 from __future__ import annotations
 
-import types
 from pathlib import Path
 
 import pytest
@@ -20,12 +20,14 @@ def mock_llm(monkeypatch):
     Supports both direct `invoke()` (narrate pattern) and
     `with_structured_output()` (classification pattern).
     """
+
     class _FakeResponse:
         def __init__(self, content: str):
             self.content = content
 
     class _FakeClassificationResult:
         """Mimics a Pydantic model instance returned by with_structured_output."""
+
         def __init__(self):
             self.sub_type = "other"
             self.severity = "medium"
@@ -67,7 +69,7 @@ def _block_network_by_default(monkeypatch, request):
 
     # Patch httpx.get in lta_lookup to raise; tests using patch() will override this
     import skymirror.tools.alert.lta_lookup as lta_mod
-    original_httpx = lta_mod.httpx
+
     fake_httpx = MagicMock()
     fake_httpx.get = MagicMock(side_effect=_raise_blocked)
     monkeypatch.setattr(lta_mod, "httpx", fake_httpx)

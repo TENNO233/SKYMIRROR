@@ -8,7 +8,6 @@ inside each expert node.
 from __future__ import annotations
 
 import logging
-from typing import Union
 
 from langgraph.types import Send
 
@@ -144,7 +143,7 @@ def _signal_activates_expert(expert_node: str, signals: dict[str, object]) -> bo
 
 def route_to_experts(
     state: SkymirrorState,
-) -> Union[list[Send], str]:
+) -> list[Send] | str:
     """
     Resolve which expert nodes should process the current frame.
 
@@ -167,7 +166,7 @@ def route_to_experts(
 
     text_lower = validated_text.lower()
     active_experts: list[str] = []
-    
+
     # Hybrid Check: Route if either the text mentions a keyword OR the signals are triggered
     for keywords, expert_node in _EXPERT_ROUTING:
         if any(keyword in text_lower for keyword in keywords) or _signal_activates_expert(
@@ -199,7 +198,7 @@ _ORCHESTRATOR_EXPERT_NODES: frozenset[str] = frozenset(
 
 def route_from_orchestrator(
     state: SkymirrorState,
-) -> Union[list[Send], str]:
+) -> list[Send] | str:
     """
     Route based on the orchestrator's ``next_nodes`` decision.
 

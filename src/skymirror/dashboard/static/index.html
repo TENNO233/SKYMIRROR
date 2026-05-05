@@ -92,7 +92,10 @@
             <h2 class="monitor-title"></h2>
           </div>
           <div class="monitor-header-meta">
-            <span class="status-chip"></span>
+            <div class="status-chip-row">
+              <span class="status-chip"></span>
+              <div class="agent-trace-strip" aria-label="Latest traced agents"></div>
+            </div>
             <span class="monitor-timestamp"></span>
           </div>
         </header>
@@ -129,7 +132,7 @@
                   Switch camera
                 </button>
               </div>
-              <p class="status-detail"></p>
+              <div class="status-log" aria-live="polite"></div>
             </div>
 
             <dl class="status-grid">
@@ -152,12 +155,11 @@
             </dl>
 
             <div class="status-copy">
-              <p class="copy-title">Latest analytic summary</p>
-              <p class="summary-text"></p>
+              <p class="copy-title">Analytic summary log</p>
+              <div class="summary-log" aria-live="polite"></div>
             </div>
 
             <div class="signal-strip"></div>
-            <div class="expert-strip"></div>
           </section>
 
           <aside class="camera-list-panel" hidden>
